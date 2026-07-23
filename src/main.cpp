@@ -4,13 +4,9 @@
 // Bumped manually on each firmware build/flash - not tied to any formal
 // versioning scheme, just a quick marker exposed via /health-check so the
 // client's Debug box can show which firmware is actually running.
-#define FIRMWARE_VERSION "0.1.1"
+#define FIRMWARE_VERSION "0.1.3"
 // Forward declarations
-void processSensor(float temp, float hum, const String& sensorId);
-void validateTemperature(float temp, const String& sensorId);
-void validateHumidity(float hum, const String& sensorId);
 bool isSensorHealthy();
-#include "AlertStorage.h"
 // Threshold settings
 
 
@@ -48,17 +44,24 @@ int CURRENT_STAGE = STAGE_GERMINATION; // Default to germination stage
 #define RELAY_ACTIVE HIGH
 #define RELAY_INACTIVE LOW
 
-AlertStorage alertStorage;
-
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
-#include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
-#include "SensorStorage.h"
 #include <DHT.h>
 #include <ArduinoOTA.h>
+
+// The last DHT reading, kept in RAM only - history now lives in TimescaleDB
+// (plamp-api's poller reads /sensors/1/read every 30s and stores it there),
+// so there's no need for the ESP32 to also persist it to flash. A reboot
+// just means the next DHT read (within dhtInterval) repopulates this.
+struct SensorReading {
+  String sensorId;
+  String temperature;
+  String humidity;
+  String timestamp;
+};
 
 // Password for wireless (OTA) firmware uploads - required by pio's
 // upload_flags in platformio.ini (env:esp-wrover-kit-ota). Change this to
@@ -80,9 +83,10 @@ DHT dht(DHTPIN, DHTTYPE);
 
 
 AsyncWebServer server(80);
-SensorStorage storage;
 Preferences actuatorPrefs;
 Preferences stagePrefs;
+
+SensorReading lastSensorReading = {"sensor1", "0", "0", "0"};
 
 // Logical actuator states: 0 = OFF, 1 = ON
 int coolerStatus = 0;
@@ -97,11 +101,40 @@ unsigned long lastSuccessfulDHTRead = 0; // 0 = never had a good read
 int dhtConsecutiveFailures = 0;
 const unsigned long DHT_STALE_THRESHOLD = dhtInterval * 3; // no good read in this long => unhealthy
 
-unsigned long lastHistorySave = 0;
-const unsigned long historyInterval = 300000; // 5 minutes
-
 // Humidity offset configuration
 #define HUMIDITY_OFFSET 20.0
+
+// WiFi connects in the background (see connectWiFi()) instead of blocking
+// setup() - sensor reads and fan/light automation in loop() don't depend on
+// it, so the device keeps doing its core job even if WiFi never comes up.
+unsigned long lastWifiAttempt = 0;
+const unsigned long wifiRetryInterval = 10000; // 10 seconds between attempts
+bool otaStarted = false; // ArduinoOTA.begin() needs a live connection, so it's deferred until the first successful connect
+
+void connectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  unsigned long now = millis();
+  if (lastWifiAttempt != 0 && now - lastWifiAttempt < wifiRetryInterval) return;
+  lastWifiAttempt = now;
+  Serial.println("WiFi: attempting connection...");
+  WiFi.begin(ssid, password);
+}
+
+void startOTA() {
+  ArduinoOTA.setHostname("plampstify");
+  ArduinoOTA.setPassword(otaPassword);
+  ArduinoOTA.onStart([]() {
+    Serial.println("OTA update starting...");
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("OTA update complete, rebooting.");
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("OTA error [%u]\n", error);
+  });
+  ArduinoOTA.begin();
+  otaStarted = true;
+}
 
 
 void setup() {
@@ -131,11 +164,6 @@ void setup() {
   digitalWrite(COOLER_PIN, coolerStatus ? RELAY_INACTIVE : RELAY_ACTIVE);
   digitalWrite(MAIN_LIGHT_PIN, lightStatus ? RELAY_INACTIVE : RELAY_ACTIVE);
   digitalWrite(DEHUMIDIFIER_PIN, dehumidifierStatus ? RELAY_INACTIVE : RELAY_ACTIVE);
-  // Endpoint: /alerts/clear
-  server.on("/alerts/clear", HTTP_POST, [](AsyncWebServerRequest *request){
-    alertStorage.clearAlerts();
-    request->send(200, "application/json", "{\"result\":\"alerts cleared\"}");
-  });
   // POST /settings to update thresholds
   server.on("/settings", HTTP_POST, [](AsyncWebServerRequest *request){
     bool updated = false;
@@ -236,52 +264,22 @@ void setup() {
     serializeJson(doc, json);
     request->send(200, "application/json", json);
   });
-  alertStorage.begin();
-
-  // Endpoint: /alerts/read
-  server.on("/alerts/read", HTTP_GET, [](AsyncWebServerRequest *request){
-    String alerts = alertStorage.getAlerts();
-    request->send(200, "application/json", alerts);
-  });
-  // Endpoint: /sensors/1/clear
-  server.on("/sensors/1/clear", HTTP_POST, [](AsyncWebServerRequest *request){
-    bool ok = storage.clearHistory("sensor1");
-    if (ok) {
-      request->send(200, "application/json", "{\"result\":\"history cleared\"}");
-    } else {
-      request->send(500, "application/json", "{\"result\":\"failed to clear history\"}");
-    }
-  });
   Serial.begin(115200);
+
+  // Non-blocking: kicks off the first connection attempt and returns
+  // immediately. The device reads sensors and drives the fan/light in
+  // loop() regardless of WiFi state - connectWiFi() is polled from loop()
+  // and keeps retrying every wifiRetryInterval until it succeeds, so a
+  // down router or bad AP at boot no longer stalls the whole device.
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi ..");
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print('.');
-    delay(1000);
-  }
-  Serial.println();
-  Serial.print("Connected! IP address: ");
-  Serial.println(WiFi.localIP());
+  connectWiFi();
 
   // Wireless firmware uploads (pio run -e esp-wrover-kit-ota -t upload) -
   // only needs to be set up once over USB; every upload after this one can
   // go over WiFi as long as the device stays powered and on the network.
-  ArduinoOTA.setHostname("plampstify");
-  ArduinoOTA.setPassword(otaPassword);
-  ArduinoOTA.onStart([]() {
-    Serial.println("OTA update starting...");
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("OTA update complete, rebooting.");
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("OTA error [%u]\n", error);
-  });
-  ArduinoOTA.begin();
+  // Deferred to loop() (see startOTA()) since it needs an active connection.
 
   dht.begin();
-  storage.begin();
 
   server.on("/health-check", HTTP_GET, [](AsyncWebServerRequest *request){
     StaticJsonDocument<256> doc;
@@ -299,21 +297,14 @@ void setup() {
 
   // Endpoint: /sensors/1/read
   server.on("/sensors/1/read", HTTP_GET, [](AsyncWebServerRequest *request){
-    SensorReading last = storage.getLastValue("sensor1");
-  StaticJsonDocument<256> doc;
-    doc["sensorId"] = last.sensorId;
-    doc["temperature"] = last.temperature;
-    doc["humidity"] = last.humidity;
-    doc["timestamp"] = last.timestamp;
+    StaticJsonDocument<256> doc;
+    doc["sensorId"] = lastSensorReading.sensorId;
+    doc["temperature"] = lastSensorReading.temperature;
+    doc["humidity"] = lastSensorReading.humidity;
+    doc["timestamp"] = lastSensorReading.timestamp;
     String json;
     serializeJson(doc, json);
     request->send(200, "application/json", json);
-  });
-
-  // Endpoint: /sensors/1/history
-  server.on("/sensors/1/history", HTTP_GET, [](AsyncWebServerRequest *request){
-    String history = storage.getHistory("sensor1");
-    request->send(200, "application/json", history);
   });
 
   // Endpoint: /actuators/light/read
@@ -410,23 +401,16 @@ void setup() {
     doc["lightStatus"] = (lightStatus) ? "ON" : "OFF";
     doc["dehumidifierStatus"] = (dehumidifierStatus) ? "ON" : "OFF";
     doc["currentStage"] = CURRENT_STAGE;
-    // Get total alerts
-    String alertsJson = alertStorage.getAlerts();
-    StaticJsonDocument<256> alertsDoc;
-    int alertCount = 0;
-    DeserializationError err = deserializeJson(alertsDoc, alertsJson);
-    if (!err && alertsDoc.is<JsonArray>()) {
-      alertCount = alertsDoc.size();
-    }
-    doc["alertCount"] = alertCount;
+    // Alert evaluation now happens in plamp-api (see server/poller.js), not
+    // on the device - this field is gone; the client reads alert count from
+    // the backend's /api/alerts/active instead.
     // Get last sensor value
-    SensorReading last = storage.getLastValue("sensor1");
     JsonArray sensorArr = doc.createNestedArray("sensor");
     JsonObject sensorObj = sensorArr.createNestedObject();
-    sensorObj["sensorId"] = last.sensorId;
-    sensorObj["temperature"] = last.temperature;
-    sensorObj["humidity"] = last.humidity;
-    sensorObj["timestamp"] = last.timestamp;
+    sensorObj["sensorId"] = lastSensorReading.sensorId;
+    sensorObj["temperature"] = lastSensorReading.temperature;
+    sensorObj["humidity"] = lastSensorReading.humidity;
+    sensorObj["timestamp"] = lastSensorReading.timestamp;
     sensorObj["status"] = isSensorHealthy() ? "ok" : "stale";
     sensorObj["lastReadAgeMs"] = (lastSuccessfulDHTRead == 0) ? -1 : (long)(millis() - lastSuccessfulDHTRead);
     String json;
@@ -491,7 +475,20 @@ void setup() {
 }
 
 void loop() {
-  ArduinoOTA.handle();
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!otaStarted) {
+      Serial.print("WiFi connected! IP address: ");
+      Serial.println(WiFi.localIP());
+      startOTA();
+    }
+    ArduinoOTA.handle();
+  } else {
+    if (otaStarted) {
+      Serial.println("WiFi connection lost");
+      otaStarted = false;
+    }
+    connectWiFi();
+  }
 
   unsigned long now = millis();
   if (now - lastDHTRead >= dhtInterval || lastDHTRead == 0) {
@@ -503,13 +500,7 @@ void loop() {
       dhtConsecutiveFailures = 0;
       hum -= HUMIDITY_OFFSET;
       String timestamp = String(now);
-      SensorReading reading = {"sensor1", String(temp, 2), String(hum, 2), timestamp};
-      storage.saveLastValue(reading);
-      if (now - lastHistorySave >= historyInterval || lastHistorySave == 0) {
-        lastHistorySave = now;
-        storage.appendHistory(reading);
-      }
-      processSensor(temp, hum, "sensor1");
+      lastSensorReading = {"sensor1", String(temp, 2), String(hum, 2), timestamp};
 
       // Cooler/exhaust-fan automation: temperature and humidity are two
       // independent triggers for the same relay (there's no separate
@@ -562,26 +553,8 @@ bool isSensorHealthy() {
   return (millis() - lastSuccessfulDHTRead) < DHT_STALE_THRESHOLD;
 }
 
-void processSensor(float temp, float hum, const String& sensorId) {
-  validateTemperature(temp, sensorId);
-  validateHumidity(hum, sensorId);
-}
-
-// Alerts reuse the same automation thresholds instead of a separate set of
-// notification-only values, so there's only one set of numbers to configure
-// (in the Ventilation Control panel).
-void validateTemperature(float temp, const String& sensorId) {
-  if (temp > VENT_MAX_TEMP) {
-    alertStorage.addAlert({1, sensorId, "TEMP_TOO_HIGH"});
-  } else if (temp < VENT_TARGET_TEMP) {
-    alertStorage.addAlert({2, sensorId, "TEMP_TOO_LOW"});
-  }
-}
-
-void validateHumidity(float hum, const String& sensorId) {
-  if (hum > VENT_MAX_HUMIDITY) {
-    alertStorage.addAlert({3, sensorId, "HUMIDITY_TOO_HIGH"});
-  } else if (hum < VENT_TARGET_HUMIDITY) {
-    alertStorage.addAlert({4, sensorId, "HUMIDITY_TOO_LOW"});
-  }
-}
+// Alert evaluation (temp/humidity too high/low) moved to plamp-api - see
+// server/poller.js. It already fetches sensor readings and /settings
+// thresholds, so it can compute the same conditions without another
+// request to the device, and stores the results in TimescaleDB where the
+// UI can read history instead of only "what's true right now".
