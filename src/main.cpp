@@ -4,7 +4,7 @@
 // Bumped manually on each firmware build/flash - not tied to any formal
 // versioning scheme, just a quick marker exposed via /health-check so the
 // client's Debug box can show which firmware is actually running.
-#define FIRMWARE_VERSION "0.1.4"
+#define FIRMWARE_VERSION "0.1.5"
 // Forward declarations
 bool isSensorHealthy();
 // Threshold settings
@@ -46,6 +46,7 @@ bool humidityWantsFanOn = false;
 #include <Preferences.h>
 #include <DHT.h>
 #include <ArduinoOTA.h>
+#include <esp_task_wdt.h>
 
 // The last DHT reading, kept in RAM only - history now lives in TimescaleDB
 // (plamp-api's poller reads /sensors/1/read every 30s and stores it there),
@@ -98,6 +99,13 @@ const unsigned long DHT_STALE_THRESHOLD = dhtInterval * 3; // no good read in th
 // Humidity offset configuration
 #define HUMIDITY_OFFSET 20.0
 
+// Task watchdog - if loop() ever stops completing (a hang, not just a slow
+// cycle), the TWDT resets the device instead of leaving it silently frozen.
+// 30s gives plenty of headroom over a normal ~30s DHT-read cycle and over
+// ArduinoOTA writing flash during an update, both of which run inline in
+// loop() and would otherwise risk tripping a tighter timeout.
+#define WDT_TIMEOUT_S 30
+
 // WiFi connects in the background (see connectWiFi()) instead of blocking
 // setup() - sensor reads and fan/light automation in loop() don't depend on
 // it, so the device keeps doing its core job even if WiFi never comes up.
@@ -132,6 +140,12 @@ void startOTA() {
 
 
 void setup() {
+  // panic=true so an unfed watchdog reboots the device rather than just
+  // logging - there's nobody around to notice a "the watchdog would have
+  // fired" message on an unattended device.
+  esp_task_wdt_init(WDT_TIMEOUT_S, true);
+  esp_task_wdt_add(NULL);
+
   // Initialize relay pins to OFF (HIGH for active-LOW relay)
   pinMode(COOLER_PIN, OUTPUT);
   digitalWrite(COOLER_PIN, RELAY_INACTIVE); // Start OFF (HIGH)
@@ -396,6 +410,8 @@ void setup() {
 }
 
 void loop() {
+  esp_task_wdt_reset();
+
   if (WiFi.status() == WL_CONNECTED) {
     if (!otaStarted) {
       Serial.print("WiFi connected! IP address: ");
