@@ -4,7 +4,7 @@
 // Bumped manually on each firmware build/flash - not tied to any formal
 // versioning scheme, just a quick marker exposed via /health-check so the
 // client's Debug box can show which firmware is actually running.
-#define FIRMWARE_VERSION "0.1.3"
+#define FIRMWARE_VERSION "0.1.4"
 // Forward declarations
 bool isSensorHealthy();
 // Threshold settings
@@ -27,14 +27,9 @@ float VENT_MAX_HUMIDITY = 75.0;    // fan turns ON at/above this
 bool tempWantsFanOn = false;
 bool humidityWantsFanOn = false;
 
-// Plant growth stages
-#define STAGE_GERMINATION 1
-#define STAGE_SEEDLING 2
-#define STAGE_VEGETATIVE 3
-#define STAGE_FLOWERING 4
-#define STAGE_HARVEST 5
-
-int CURRENT_STAGE = STAGE_GERMINATION; // Default to germination stage
+// Plant growth stage tracking moved to plamp-api's growth_phase table (see
+// server/db.js current_stage column) - it was never read by any on-device
+// automation logic, just relayed back and forth over HTTP.
 
 #define COOLER_PIN 16 // GPIO pin for relay channel 1 (adjust as needed)
 #define MAIN_LIGHT_PIN 17 // GPIO pin for relay channel 2 (adjust as needed)
@@ -84,7 +79,6 @@ DHT dht(DHTPIN, DHTTYPE);
 
 AsyncWebServer server(80);
 Preferences actuatorPrefs;
-Preferences stagePrefs;
 
 SensorReading lastSensorReading = {"sensor1", "0", "0", "0"};
 
@@ -148,15 +142,11 @@ void setup() {
 
   // Initialize actuator preferences
   actuatorPrefs.begin("actuators", false);
-  
-  // Initialize stage preferences
-  stagePrefs.begin("stages", false);
-  
+
   // Restore previous logical states from memory
   coolerStatus = actuatorPrefs.getInt("cooler", 0);
   lightStatus = actuatorPrefs.getInt("light", 0);
   dehumidifierStatus = actuatorPrefs.getInt("dehumid", 0);
-  CURRENT_STAGE = stagePrefs.getInt("stage", STAGE_GERMINATION);
   VENT_TEMP_AUTO = actuatorPrefs.getInt("ventTempAuto", 1) == 1;
   VENT_HUMIDITY_AUTO = actuatorPrefs.getInt("ventHumidAuto", 1) == 1;
 
@@ -200,14 +190,6 @@ void setup() {
       VENT_MAX_HUMIDITY = request->getParam("maxHumidity", true)->value().toFloat();
       updated = true;
     }
-    if (request->hasParam("CURRENT_STAGE", true)) {
-      int newStage = request->getParam("CURRENT_STAGE", true)->value().toInt();
-      if (newStage >= 1 && newStage <= 5) {
-        CURRENT_STAGE = newStage;
-        stagePrefs.putInt("stage", CURRENT_STAGE);
-        updated = true;
-      }
-    }
     // 2. If not updated, try to parse JSON body
     if (!updated && request->contentType().indexOf("application/json") >= 0) {
       String body;
@@ -228,13 +210,6 @@ void setup() {
           }
           if (doc.containsKey("targetHumidity")) VENT_TARGET_HUMIDITY = doc["targetHumidity"].as<float>();
           if (doc.containsKey("maxHumidity")) VENT_MAX_HUMIDITY = doc["maxHumidity"].as<float>();
-          if (doc.containsKey("CURRENT_STAGE")) {
-            int newStage = doc["CURRENT_STAGE"].as<int>();
-            if (newStage >= 1 && newStage <= 5) {
-              CURRENT_STAGE = newStage;
-              stagePrefs.putInt("stage", CURRENT_STAGE);
-            }
-          }
         }
       }
     }
@@ -245,7 +220,6 @@ void setup() {
   doc["humidityBased"] = VENT_HUMIDITY_AUTO;
   doc["targetHumidity"] = VENT_TARGET_HUMIDITY;
   doc["maxHumidity"] = VENT_MAX_HUMIDITY;
-  doc["CURRENT_STAGE"] = CURRENT_STAGE;
   String json;
   serializeJson(doc, json);
   request->send(200, "application/json", json);
@@ -259,7 +233,6 @@ void setup() {
     doc["humidityBased"] = VENT_HUMIDITY_AUTO;
     doc["targetHumidity"] = VENT_TARGET_HUMIDITY;
     doc["maxHumidity"] = VENT_MAX_HUMIDITY;
-    doc["CURRENT_STAGE"] = CURRENT_STAGE;
     String json;
     serializeJson(doc, json);
     request->send(200, "application/json", json);
@@ -400,10 +373,10 @@ void setup() {
     doc["coolerHumidityAutoMode"] = VENT_HUMIDITY_AUTO;
     doc["lightStatus"] = (lightStatus) ? "ON" : "OFF";
     doc["dehumidifierStatus"] = (dehumidifierStatus) ? "ON" : "OFF";
-    doc["currentStage"] = CURRENT_STAGE;
-    // Alert evaluation now happens in plamp-api (see server/poller.js), not
-    // on the device - this field is gone; the client reads alert count from
-    // the backend's /api/alerts/active instead.
+    // Growth stage now lives in plamp-api's growth_phase table (see
+    // server/db.js's current_stage column), and alert evaluation now
+    // happens in plamp-api too (see server/poller.js) - both fields are
+    // gone from here; the client reads them from the backend instead.
     // Get last sensor value
     JsonArray sensorArr = doc.createNestedArray("sensor");
     JsonObject sensorObj = sensorArr.createNestedObject();
@@ -417,58 +390,6 @@ void setup() {
     serializeJson(doc, json);
     request->send(200, "application/json", json);
   });
-
-  // Endpoint: /stage/get
-  server.on("/stage/get", HTTP_GET, [](AsyncWebServerRequest *request){
-    StaticJsonDocument<128> doc;
-    doc["currentStage"] = CURRENT_STAGE;
-    String stageName;
-    switch(CURRENT_STAGE) {
-      case STAGE_GERMINATION: stageName = "germination"; break;
-      case STAGE_SEEDLING: stageName = "seedling"; break;
-      case STAGE_VEGETATIVE: stageName = "vegetative"; break;
-      case STAGE_FLOWERING: stageName = "flowering"; break;
-      case STAGE_HARVEST: stageName = "harvest"; break;
-      default: stageName = "unknown"; break;
-    }
-    doc["stageName"] = stageName;
-    String json;
-    serializeJson(doc, json);
-    request->send(200, "application/json", json);
-  });
-
-  // Endpoint: /stage/update
-  server.on("/stage/update", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (request->hasParam("id")) {
-      int newStage = request->getParam("id")->value().toInt();
-      if (newStage >= 1 && newStage <= 5) {
-        CURRENT_STAGE = newStage;
-        stagePrefs.putInt("stage", CURRENT_STAGE);
-        
-        StaticJsonDocument<128> doc;
-        doc["result"] = "stage updated";
-        doc["currentStage"] = CURRENT_STAGE;
-        String stageName;
-        switch(CURRENT_STAGE) {
-          case STAGE_GERMINATION: stageName = "germination"; break;
-          case STAGE_SEEDLING: stageName = "seedling"; break;
-          case STAGE_VEGETATIVE: stageName = "vegetative"; break;
-          case STAGE_FLOWERING: stageName = "flowering"; break;
-          case STAGE_HARVEST: stageName = "harvest"; break;
-          default: stageName = "unknown"; break;
-        }
-        doc["stageName"] = stageName;
-        String json;
-        serializeJson(doc, json);
-        request->send(200, "application/json", json);
-      } else {
-        request->send(400, "application/json", "{\"error\":\"Invalid stage ID. Must be 1-5\"}");
-      }
-    } else {
-      request->send(400, "application/json", "{\"error\":\"Missing id parameter\"}");
-    }
-  });
-
 
   server.begin();
 // removed extra closing brace
