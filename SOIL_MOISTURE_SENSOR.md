@@ -83,11 +83,32 @@ the difference here is potting it properly.
 
 ### 3.4 Potting / waterproofing procedure
 
+The epoxy doesn't block the reading - a capacitor doesn't need bare metal
+touching the medium, it needs an electric field passing through it. The
+field from one plate passes through the epoxy, out into the soil (where
+moisture changes the dielectric constant), and back through the epoxy
+into the other plate - the coating and the soil are effectively two
+capacitors in series. This is exactly how every commercial capacitive
+soil sensor works; the coating is required by design (bare metal would
+make it a resistive sensor instead, and corrode), not an accident of
+manufacturing.
+
+The one real tradeoff is **thickness**: for capacitors in series, the
+*smallest* one dominates the total. A thick epoxy coat has a small
+capacitance of its own that becomes the bottleneck and swamps the soil's
+contribution - the probe would still produce a reading, just a much
+weaker, less sensitive one. Keep the coat thin.
+
 1. Solder plate leads first; verify continuity and no shorts before
    potting anything (nothing is fixable once epoxied).
 2. Sandwich the two plates around the insulating spacer, tack in place.
 3. Dip/pot the **entire** plate assembly - both faces and every edge -
-   in epoxy. Only the lead wires should exit the cured epoxy block.
+   in epoxy, as a **thin, even coat** (just enough that no bare copper is
+   exposed anywhere) rather than a thick blob - especially in the gap
+   between the two plates, where the field actually needs to reach into
+   the soil. A dip-and-drain or thin brushed coat works better here than
+   pouring/casting a thick block around it. Only the lead wires should
+   exit the cured epoxy.
 4. Full cure per the epoxy's spec sheet (commonly ~24h).
 5. Optional extra seal: heat-shrink over the epoxy/wire seam, with a dab
    of epoxy at the very top so water can't wick down inside the wire's
@@ -95,6 +116,10 @@ the difference here is potting it properly.
 6. Before burying it: verify with a multimeter that there's no continuity
    between either plate lead and a wet paper towel wrapped around the
    cured probe. This is the actual proof the potting worked.
+7. Recalibrate (section 5.1's dry/wet reference points) against the
+   potted probe, not any bare-copper test readings from before step 3 -
+   the coating's series capacitance shifts the raw values, calibration
+   just needs to be internally consistent, not match some absolute number.
 
 ## 4. Design option B (simpler, fewer parts): ESP32 native touch-pin sensing
 
