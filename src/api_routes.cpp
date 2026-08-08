@@ -183,6 +183,34 @@ void handleStatus(AsyncWebServerRequest* request) {
 } // namespace
 
 void registerRoutes(AsyncWebServer& server) {
+  // The web app (plampControlCenter) fetches this device's endpoints
+  // directly from the browser (apiService.js), not through the plamp-api
+  // backend - and it's always served from a different origin (different
+  // port at minimum, e.g. the Vite dev server on :5173 vs this device on
+  // :80). Without CORS headers, the browser silently blocks the response
+  // from ever reaching JS - fetch() rejects as if the device were
+  // unreachable, even though it actually answered. No auth exists
+  // anywhere in this app (single-operator, LAN-only by design), so a
+  // permissive "*" origin matches server/index.js's own plamp-api CORS
+  // policy (plain `cors()`, also wide open).
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  // The actuator switch endpoints are HTTP_PUT, which browsers always
+  // preflight with an OPTIONS request before sending the real one - with
+  // no route registered for OPTIONS, AsyncWebServer would 404 it and the
+  // real PUT never gets sent. Falling through to onNotFound for any
+  // unmatched OPTIONS request (rather than registering one per route)
+  // answers every preflight in one place.
+  server.onNotFound([](AsyncWebServerRequest* request) {
+    if (request->method() == HTTP_OPTIONS) {
+      request->send(200);
+    } else {
+      request->send(404);
+    }
+  });
+
   server.on("/settings", HTTP_POST, handleSettingsPost);
   server.on("/settings", HTTP_GET, handleSettingsGet);
   server.on("/health-check", HTTP_GET, handleHealthCheck);
