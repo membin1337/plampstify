@@ -19,6 +19,8 @@ void setup() {
   esp_task_wdt_add(NULL);
 
   Serial.begin(115200);
+  Serial.print("plampstify firmware v");
+  Serial.println(FIRMWARE_VERSION);
 
   initActuators();
   initAutomation();
