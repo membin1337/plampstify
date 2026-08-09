@@ -1,9 +1,11 @@
 #pragma once
 
+#include <IPAddress.h>
+
 // Bumped manually on each firmware build/flash - not tied to any formal
 // versioning scheme, just a quick marker exposed via /health-check so the
 // client's Debug box can show which firmware is actually running.
-#define FIRMWARE_VERSION "0.1.8"
+#define FIRMWARE_VERSION "0.1.9"
 
 // Relay GPIO pins.
 // NOTE: GPIO16/17 are also used internally by ESP32-WROVER modules for the
@@ -28,6 +30,27 @@ constexpr unsigned long DHT_READ_INTERVAL_MS = 30000; // 30 seconds
 constexpr unsigned long DHT_STALE_THRESHOLD_MS = DHT_READ_INTERVAL_MS * 3;
 
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 10000; // 10 seconds between attempts
+
+// Static IP, bypassing the router's DHCP entirely - confirmed via
+// repeated arp/ping checks from a LAN client that 192.168.0.69 was being
+// handed to two different MACs at different times (the device's real,
+// factory Espressif MAC, and a second locally-administered/randomized
+// MAC - almost certainly a phone or laptop's WiFi privacy address,
+// picking up the device's stale DHCP lease while it was offline during
+// unrelated firmware testing). No access to the router to set a proper
+// DHCP reservation, so this sidesteps the conflict on the device's own
+// side instead - .222 is a deliberately high, uncommon address chosen to
+// sit outside the low/most-commonly-used part of most routers' default
+// DHCP pools. If this address turns out to collide with something else,
+// change it here (and in plampControlCenter's docker-compose.yml
+// ESP32_URL / defaultState.js API_IP / platformio.ini's OTA upload_port,
+// and the app's own Settings page).
+// Plain `const` rather than `constexpr` - IPAddress's constructor isn't
+// constexpr-qualified in every version of this core.
+const IPAddress STATIC_IP(192, 168, 0, 222);
+const IPAddress STATIC_GATEWAY(192, 168, 0, 1);
+const IPAddress STATIC_SUBNET(255, 255, 255, 0);
+const IPAddress STATIC_DNS(192, 168, 0, 1); // most home routers proxy DNS through themselves
 
 // Task watchdog - if loop() ever stops completing (a hang, not just a slow
 // cycle), the TWDT resets the device instead of leaving it silently frozen.

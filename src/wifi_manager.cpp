@@ -20,6 +20,10 @@ void connectWiFi() {
   if (lastWifiAttempt != 0 && now - lastWifiAttempt < WIFI_RETRY_INTERVAL_MS) return;
   lastWifiAttempt = now;
   Serial.println("WiFi: attempting connection...");
+  // Static IP (see config.h's STATIC_IP comment) - must be set again on
+  // every (re)connect attempt, not just once at boot, since WiFi.begin()
+  // resets the interface's IP configuration.
+  WiFi.config(STATIC_IP, STATIC_GATEWAY, STATIC_SUBNET, STATIC_DNS);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
