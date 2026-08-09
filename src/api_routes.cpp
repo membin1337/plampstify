@@ -12,7 +12,16 @@ namespace {
 void sendJson(AsyncWebServerRequest* request, const JsonDocument& doc) {
   String json;
   serializeJson(doc, json);
-  request->send(200, "application/json", json);
+  // Explicit Connection: close rather than leaving a keep-alive socket
+  // open after each response - this device gets polled by several
+  // independent clients on their own schedules (a browser, plamp-api's
+  // backend poller), and nothing here ever proactively released a
+  // reused connection; forcing a close after every response keeps
+  // AsyncTCP's small connection pool from slowly filling up with
+  // sockets neither side is actively using.
+  AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
+  response->addHeader("Connection", "close");
+  request->send(response);
 }
 
 void writeVentSettingsDoc(JsonDocument& doc) {

@@ -43,6 +43,16 @@ void startOTA() {
 
 void initWiFi() {
   WiFi.mode(WIFI_STA);
+  // Arduino-ESP32 defaults to modem sleep (WIFI_PS_MIN_MODEM) - the radio
+  // dozes between beacon intervals to save power, and an incoming
+  // connection attempt that lands during one of those windows gets
+  // delayed or silently dropped rather than answered. That matches
+  // exactly what was observed: the device stays associated to WiFi (no
+  // disconnect, no reboot, no brownout) but answers HTTP requests only
+  // sporadically. This device is mains-powered (relays, not battery), so
+  // there's no reason to trade responsiveness for a power saving that
+  // doesn't matter here.
+  WiFi.setSleep(false);
   connectWiFi();
 }
 
