@@ -5,7 +5,7 @@
 // Bumped manually on each firmware build/flash - not tied to any formal
 // versioning scheme, just a quick marker exposed via /health-check so the
 // client's Debug box can show which firmware is actually running.
-#define FIRMWARE_VERSION "0.1.9"
+#define FIRMWARE_VERSION "0.1.10"
 
 // Relay GPIO pins.
 // NOTE: GPIO16/17 are also used internally by ESP32-WROVER modules for the

@@ -98,7 +98,7 @@ void handleSettingsPost(AsyncWebServerRequest* request) {
 
 void handleHealthCheck(AsyncWebServerRequest* request) {
   StaticJsonDocument<256> doc;
-  doc["status"] = "ALLRAITY";
+  doc["status"] = "OK";
   doc["firmwareVersion"] = FIRMWARE_VERSION;
   doc["sensorOk"] = isSensorHealthy();
   doc["sensorLastReadAgeMs"] = getSensorLastReadAgeMs();
