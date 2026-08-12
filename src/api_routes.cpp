@@ -122,8 +122,22 @@ void handleLightRead(AsyncWebServerRequest* request) {
   sendJson(request, doc);
 }
 
+// Optional `?state=on|off` query param picks the explicit target state
+// instead of blindly flipping whatever the relay currently is - added so
+// two clients (e.g. two open browser tabs) both deciding "it's on, turn
+// it off" based on their own last-known state land on the same result
+// (off) instead of racing to a double-flip (off -> on) if their requests
+// interleave. Falls back to the old toggle behavior when the param is
+// absent, for compatibility with any caller not yet passing it.
+bool resolveDesiredState(AsyncWebServerRequest* request, bool currentState) {
+  if (request->hasParam("state")) {
+    return request->getParam("state")->value() == "on";
+  }
+  return !currentState;
+}
+
 void handleLightSwitch(AsyncWebServerRequest* request) {
-  setLightStatus(getLightStatus() ? 0 : 1);
+  setLightStatus(resolveDesiredState(request, getLightStatus()) ? 1 : 0);
   StaticJsonDocument<128> doc;
   doc["status"] = getLightStatus() ? "ON" : "OFF";
   sendJson(request, doc);
@@ -139,7 +153,7 @@ void handleFanRead(AsyncWebServerRequest* request) {
 
 void handleFanSwitch(AsyncWebServerRequest* request) {
   Serial.println("[/actuators/fan/switch] Manual fan switch invoked - disabling both auto flags");
-  setCoolerStatus(getCoolerStatus() ? 0 : 1);
+  setCoolerStatus(resolveDesiredState(request, getCoolerStatus()) ? 1 : 0);
   // A manual switch overrides automatic control (both temperature and
   // humidity triggers, since they share this one relay) until re-enabled
   // from the UI.
@@ -160,7 +174,7 @@ void handleDehumidifierRead(AsyncWebServerRequest* request) {
 }
 
 void handleDehumidifierSwitch(AsyncWebServerRequest* request) {
-  setDehumidifierStatus(getDehumidifierStatus() ? 0 : 1);
+  setDehumidifierStatus(resolveDesiredState(request, getDehumidifierStatus()) ? 1 : 0);
   StaticJsonDocument<128> doc;
   doc["status"] = getDehumidifierStatus() ? "ON" : "OFF";
   sendJson(request, doc);
