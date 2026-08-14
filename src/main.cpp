@@ -7,6 +7,7 @@
 #include "automation.h"
 #include "config.h"
 #include "sensors.h"
+#include "server_report.h"
 #include "wifi_manager.h"
 
 AsyncWebServer server(80);
@@ -25,6 +26,11 @@ void setup() {
   initActuators();
   initAutomation();
   initSensors();
+  // Reads the NVS-cached apiHost before initWiFi() so it's ready before
+  // loop()'s first pollServerReport() call can ever see
+  // wifiJustReconnected() true (that first connect itself happens
+  // asynchronously, detected via pollOTA() once loop() starts running).
+  initServerReport();
 
   // Non-blocking: kicks off the first connection attempt and returns
   // immediately. The device reads sensors and drives the fan/light in
@@ -41,6 +47,7 @@ void loop() {
   esp_task_wdt_reset();
 
   pollOTA(); // also handles WiFi reconnects
+  pollServerReport(); // POSTs a check-in to the API right after a reconnect
 
   if (pollSensors()) {
     const SensorReading& reading = getLastSensorReading();

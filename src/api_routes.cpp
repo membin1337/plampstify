@@ -6,6 +6,7 @@
 #include "automation.h"
 #include "config.h"
 #include "sensors.h"
+#include "server_report.h"
 
 namespace {
 
@@ -203,6 +204,29 @@ void handleStatus(AsyncWebServerRequest* request) {
   sendJson(request, doc);
 }
 
+// plamp-api reports its own current address here (bidirectional IP
+// discovery, see TODO.md's "Fall back to a backup WiFi network" entry) -
+// the counterpart to this device's own check-in POST (see
+// server_report.cpp's reportCheckIn(), sent to server/index.js's
+// POST /api/esp32/check-in). Follows handleSettingsPost's JSON-body
+// pattern above rather than reading a request header - no existing
+// handler in this file reads headers, and a dedicated endpoint per
+// concern matches this file's existing one-handler-per-route style.
+void handleServerAddress(AsyncWebServerRequest* request) {
+  bool updated = false;
+  if (request->contentType().indexOf("application/json") >= 0 && request->hasParam("plain", true)) {
+    String body = request->getParam("plain", true)->value();
+    StaticJsonDocument<192> doc;
+    if (!deserializeJson(doc, body) && doc.containsKey("host")) {
+      setApiHost(doc["host"].as<String>());
+      updated = true;
+    }
+  }
+  StaticJsonDocument<128> doc;
+  doc["ok"] = updated;
+  sendJson(request, doc);
+}
+
 } // namespace
 
 void registerRoutes(AsyncWebServer& server) {
@@ -245,4 +269,5 @@ void registerRoutes(AsyncWebServer& server) {
   server.on("/actuators/dehumidifier/read", HTTP_GET, handleDehumidifierRead);
   server.on("/actuators/dehumidifier/switch", HTTP_PUT, handleDehumidifierSwitch);
   server.on("/status", HTTP_GET, handleStatus);
+  server.on("/server-address", HTTP_POST, handleServerAddress);
 }
