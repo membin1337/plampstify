@@ -47,9 +47,11 @@ constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 10000; // 10 seconds between at
 // side instead - .222 is a deliberately high, uncommon address chosen to
 // sit outside the low/most-commonly-used part of most routers' default
 // DHCP pools. If this address turns out to collide with something else,
-// change it here (and in plampControlCenter's docker-compose.yml
-// ESP32_URL / defaultState.js API_IP / platformio.ini's OTA upload_port,
-// and the app's own Settings page).
+// change it here - plampControlCenter's docker-compose.yml ESP32_URL/
+// defaultState.js API_IP/Settings page all now self-correct via the
+// device's own check-in (see server_report.cpp), and platformio.ini's OTA
+// upload_port targets the mDNS hostname (plampstify.local) rather than
+// this IP directly, so neither needs a matching manual update anymore.
 // Plain `const` rather than `constexpr` - IPAddress's constructor isn't
 // constexpr-qualified in every version of this core.
 const IPAddress STATIC_IP(192, 168, 0, 222);
