@@ -24,6 +24,15 @@ bool justReconnected = false;
 // WiFi.config()+WiFi.reconnect() forever once the static IP is already
 // applied and just waiting for re-association to finish.
 bool applyingStaticIp = false;
+// True for the duration of an active OTA transfer - api_routes.cpp's
+// middleware checks this (via isOtaInProgress()) to reject normal HTTP
+// traffic while an update is in flight, so the poller/browser hitting
+// /status or switching an actuator doesn't compete with OTA's own TCP
+// traffic for the WiFi radio/LWIP stack's attention on an already-
+// marginal link. Cleared on both onEnd() and onError() - a *failed* OTA
+// must not leave the device permanently refusing real requests until a
+// manual power-cycle.
+bool otaInProgress = false;
 
 void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
@@ -43,12 +52,15 @@ void startOTA() {
   ArduinoOTA.setPassword(OTA_PASSWORD);
   ArduinoOTA.onStart([]() {
     Serial.println("OTA update starting...");
+    otaInProgress = true;
   });
   ArduinoOTA.onEnd([]() {
     Serial.println("OTA update complete, rebooting.");
+    otaInProgress = false; // the device reboots itself right after this anyway
   });
   ArduinoOTA.onError([](ota_error_t error) {
     Serial.printf("OTA error [%u]\n", error);
+    otaInProgress = false; // failed, not rebooting - resume normal serving
   });
   ArduinoOTA.begin();
   otaStarted = true;
@@ -114,4 +126,8 @@ bool wifiJustReconnected() {
   bool result = justReconnected;
   justReconnected = false;
   return result;
+}
+
+bool isOtaInProgress() {
+  return otaInProgress;
 }

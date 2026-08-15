@@ -7,6 +7,7 @@
 #include "config.h"
 #include "sensors.h"
 #include "server_report.h"
+#include "wifi_manager.h"
 
 namespace {
 
@@ -244,6 +245,30 @@ void registerRoutes(AsyncWebServer& server) {
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  // Rejects everything except /health-check while an OTA transfer is in
+  // flight (see wifi_manager.h's isOtaInProgress()) - the poller hitting
+  // /status every 30s, a browser tab polling directly, or an actuator
+  // switch mid-upload all compete with OTA's own TCP traffic for the
+  // WiFi radio/LWIP stack's attention, which matters on an already
+  // marginal link (see TODO.md's WiFi-fallback entries). /health-check
+  // stays available since it's cheap (touches no sensors/actuators) and
+  // useful to confirm the device is still alive mid-update. Applied via
+  // AsyncWebServer's middleware chain (checked before any route handler
+  // runs) rather than a per-handler guard, so nothing new added later
+  // needs to remember to check this itself.
+  server.addMiddleware([](AsyncWebServerRequest* request, ArMiddlewareNext next) {
+    if (isOtaInProgress() && request->url() != "/health-check") {
+      // A real 503, not sendJson()'s hardcoded 200 - server/poller.js's
+      // fetchJson (and every other caller) checks res.ok (2xx) to decide
+      // success/failure, so this needs to read as a genuine failure
+      // rather than a malformed-but-"successful" /status response.
+      AsyncWebServerResponse* response = request->beginResponse(503, "application/json", "{\"error\":\"OTA update in progress\"}");
+      request->send(response);
+      return;
+    }
+    next();
+  });
 
   // The actuator switch endpoints are HTTP_PUT, which browsers always
   // preflight with an OPTIONS request before sending the real one - with

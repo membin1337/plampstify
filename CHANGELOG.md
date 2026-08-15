@@ -4,6 +4,14 @@ Tracks `FIRMWARE_VERSION` (`include/config.h`) - bumped manually on each
 firmware build/flash, exposed via `/health-check` so the client's Debug
 box can show which firmware is actually running. Newest first.
 
+## 0.1.13 - 2026-08-15
+OTA reliability: `platformio.ini`'s OTA env now targets `plampstify.local`
+(mDNS, already advertised by `ArduinoOTA.begin()`) instead of a hardcoded
+IP, plus a raised invitation timeout (`--timeout=30`). The device now also
+pauses normal HTTP serving (except `/health-check`) for the duration of an
+OTA transfer via a new middleware in `api_routes.cpp`, to reduce
+contention on an already-marginal WiFi link.
+
 ## 0.1.12 - 2026-08-14
 Added multi-SSID WiFi fallback via `WiFiMulti` (`secrets.h`'s single
 `{ssid, password}` pair became an array, static IP now only applied for

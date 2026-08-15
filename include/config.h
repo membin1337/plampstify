@@ -9,8 +9,8 @@
 // lets the Debug panel show "updated X ago" instead of just a bare
 // version number, matching plampControlCenter's API_VERSION_UPDATED_AT/
 // CLIENT_VERSION_UPDATED_AT convention.
-#define FIRMWARE_VERSION "0.1.12"
-#define FIRMWARE_VERSION_UPDATED_AT "2026-08-14T20:56:50-03:00"
+#define FIRMWARE_VERSION "0.1.13"
+#define FIRMWARE_VERSION_UPDATED_AT "2026-08-15T02:25:07-03:00"
 
 // Relay GPIO pins.
 // NOTE: GPIO16/17 are also used internally by ESP32-WROVER modules for the

@@ -21,3 +21,9 @@ void pollOTA();
 // the flag is one-shot (reading it clears it), so call this at most once
 // per loop() iteration.
 bool wifiJustReconnected();
+
+// True for the duration of an active OTA transfer (set in startOTA()'s
+// onStart/onEnd/onError callbacks) - api_routes.cpp's middleware checks
+// this to reject normal HTTP traffic while an update is in flight, so it
+// doesn't compete with OTA's own traffic on an already-marginal WiFi link.
+bool isOtaInProgress();
