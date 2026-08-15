@@ -4,6 +4,15 @@ Tracks `FIRMWARE_VERSION` (`include/config.h`) - bumped manually on each
 firmware build/flash, exposed via `/health-check` so the client's Debug
 box can show which firmware is actually running. Newest first.
 
+## 0.1.14 - 2026-08-15
+Reports the network SSID alongside its IP on every check-in
+(`server_report.cpp`), and reports its actual NTP-synced boot time via
+`/health-check` (new `boot_time.cpp`) instead of a hardcoded compile-time
+timestamp - the latter only ever reflected when the source was written,
+not when a given device was actually flashed with it (a device showed
+"updated 14 hours ago" right after being flashed - that's how long it had
+been since the commit, not the flash).
+
 ## 0.1.13 - 2026-08-15
 OTA reliability: `platformio.ini`'s OTA env now targets `plampstify.local`
 (mDNS, already advertised by `ArduinoOTA.begin()`) instead of a hardcoded

@@ -5,6 +5,7 @@
 #include "actuators.h"
 #include "api_routes.h"
 #include "automation.h"
+#include "boot_time.h"
 #include "config.h"
 #include "sensors.h"
 #include "server_report.h"
@@ -38,6 +39,9 @@ void setup() {
   // retrying every WIFI_RETRY_INTERVAL_MS until it succeeds, so a down
   // router or bad AP at boot no longer stalls the whole device.
   initWiFi();
+  // Safe to call before WiFi actually connects - just queues the SNTP
+  // request, which resolves in the background once a connection exists.
+  initBootTime();
 
   registerRoutes(server);
   server.begin();

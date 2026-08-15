@@ -4,6 +4,7 @@
 
 #include "actuators.h"
 #include "automation.h"
+#include "boot_time.h"
 #include "config.h"
 #include "sensors.h"
 #include "server_report.h"
@@ -102,7 +103,13 @@ void handleHealthCheck(AsyncWebServerRequest* request) {
   StaticJsonDocument<256> doc;
   doc["status"] = "OK";
   doc["firmwareVersion"] = FIRMWARE_VERSION;
-  doc["firmwareVersionUpdatedAt"] = FIRMWARE_VERSION_UPDATED_AT;
+  // Actual boot time (see boot_time.cpp) rather than a hardcoded
+  // compile-time constant - the latter only ever reflected when the
+  // source was written, not when it was actually flashed onto a given
+  // device. Omitted (not even an empty string) until NTP has synced,
+  // typically a few seconds after boot.
+  String bootTimeIso = getBootTimeIso();
+  if (bootTimeIso.length() > 0) doc["firmwareVersionUpdatedAt"] = bootTimeIso;
   doc["sensorOk"] = isSensorHealthy();
   doc["sensorLastReadAgeMs"] = getSensorLastReadAgeMs();
   doc["sensorConsecutiveFailures"] = getSensorConsecutiveFailures();

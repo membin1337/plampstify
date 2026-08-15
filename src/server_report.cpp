@@ -1,5 +1,6 @@
 #include "server_report.h"
 
+#include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <WiFi.h>
@@ -24,7 +25,16 @@ void reportCheckIn() {
   http.begin(url);
   http.setTimeout(5000);
   http.addHeader("Content-Type", "application/json");
-  String body = String("{\"ip\":\"") + WiFi.localIP().toString() + "\"}";
+  // ArduinoJson rather than hand-concatenating the body (as this used to,
+  // back when it was just {"ip":"..."}) - an SSID (unlike an IP) isn't
+  // guaranteed free of characters that would need escaping in a hand-built
+  // JSON string, and this matches how the rest of the firmware builds its
+  // JSON (api_routes.cpp's handlers).
+  StaticJsonDocument<192> doc;
+  doc["ip"] = WiFi.localIP().toString();
+  doc["ssid"] = WiFi.SSID();
+  String body;
+  serializeJson(doc, body);
   int code = http.POST(body);
   Serial.printf("[server_report] check-in POST -> %d\n", code);
   http.end();
