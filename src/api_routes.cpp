@@ -6,6 +6,7 @@
 #include "automation.h"
 #include "boot_time.h"
 #include "config.h"
+#include "secrets.h"
 #include "sensors.h"
 #include "server_report.h"
 #include "wifi_manager.h"
@@ -236,6 +237,21 @@ void handleServerAddress(AsyncWebServerRequest* request) {
   sendJson(request, doc);
 }
 
+// The 5 routes that actually change device state - actuator switches,
+// vent settings, and the server-reported address. Checked by method+path
+// together, not path alone, since /settings is registered under both
+// GET (read) and POST (write) - see registerRoutes below.
+bool isWriteRoute(AsyncWebServerRequest* request) {
+  const String& url = request->url();
+  int method = request->method();
+  if (method == HTTP_POST && url == "/settings") return true;
+  if (method == HTTP_PUT && url == "/actuators/light/switch") return true;
+  if (method == HTTP_PUT && url == "/actuators/fan/switch") return true;
+  if (method == HTTP_PUT && url == "/actuators/dehumidifier/switch") return true;
+  if (method == HTTP_POST && url == "/server-address") return true;
+  return false;
+}
+
 } // namespace
 
 void registerRoutes(AsyncWebServer& server) {
@@ -273,6 +289,29 @@ void registerRoutes(AsyncWebServer& server) {
       AsyncWebServerResponse* response = request->beginResponse(503, "application/json", "{\"error\":\"OTA update in progress\"}");
       request->send(response);
       return;
+    }
+    next();
+  });
+
+  // Rejects the 5 write routes (see isWriteRoute above) unless the
+  // request carries the correct X-Device-Key header (secrets.h's
+  // DEVICE_API_KEY) - only plamp-api holds this key, so this is what
+  // actually makes "the ESP only responds to a valid admin user" real
+  // (TODO.md's "Multi-user accounts with roles" entry): plamp-api checks
+  // the requesting human's role itself and only ever forwards a write,
+  // with this key attached, once that check passes (or when it's
+  // plamp-api's own unattended automation/schedule action, which is
+  // inherently trusted the same way). OPTIONS preflight and every read
+  // route are untouched - checked ahead of the onNotFound OPTIONS
+  // handler below, so a preflight for a gated route still gets its 200.
+  server.addMiddleware([](AsyncWebServerRequest* request, ArMiddlewareNext next) {
+    if (request->method() != HTTP_OPTIONS && isWriteRoute(request)) {
+      const AsyncWebHeader* header = request->getHeader("X-Device-Key");
+      if (!header || header->value() != DEVICE_API_KEY) {
+        AsyncWebServerResponse* response = request->beginResponse(401, "application/json", "{\"error\":\"unauthorized\"}");
+        request->send(response);
+        return;
+      }
     }
     next();
   });

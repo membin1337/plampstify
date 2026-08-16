@@ -4,6 +4,16 @@ Tracks `FIRMWARE_VERSION` (`include/config.h`) - bumped manually on each
 firmware build/flash, exposed via `/health-check` so the client's Debug
 box can show which firmware is actually running. Newest first.
 
+## 0.2.0 - 2026-08-15
+Multi-user accounts with roles (TODO.md idea #7): the 5 write routes
+(actuator switches, `/settings` POST, `/server-address`) now reject
+anything without a matching `X-Device-Key` header (`secrets.h`'s new
+`DEVICE_API_KEY`, checked via a new middleware in `api_routes.cpp`) - only
+plampControlCenter's plamp-api holds this key, and it only ever forwards a
+write after checking the requesting human's role (or for its own
+automation/schedule actions, which are inherently trusted). Read routes
+and OPTIONS preflight are untouched.
+
 ## 0.1.14 - 2026-08-15
 Reports the network SSID alongside its IP on every check-in
 (`server_report.cpp`), and reports its actual NTP-synced boot time via

@@ -12,7 +12,7 @@
 // it (confirmed as a real, confusing bug in practice on 2026-08-15 - a
 // device showed "updated 14 hours ago" right after being flashed, because
 // that's how long it had been since the commit, not the flash).
-#define FIRMWARE_VERSION "0.1.14"
+#define FIRMWARE_VERSION "0.2.0"
 
 // Relay GPIO pins.
 // NOTE: GPIO16/17 are also used internally by ESP32-WROVER modules for the
