@@ -208,7 +208,7 @@ starting scheme.
 | J1 | DHT22 | DATA, VCC, GND | GPIO4, GPIO27, GND |
 | J2 | DS18B20 | DATA, VCC, GND | GPIO13 (+ on-board 4.7kΩ pull-up to 3.3V), 3.3V, GND |
 | J3 | MH-Z19B CO2 sensor | VCC, GND, TX, RX | 5V, GND, GPIO14 (ESP32 RX, sensor's TX), GPIO19 (ESP32 TX, sensor's RX) |
-| J4 | LDR light sensor | 2 (or mount the whole divider on-board and skip this connector if the LDR doesn't need to be positioned away from the perfboard) | GPIO36 side, GND side - fixed divider resistor stays on the perfboard either way |
+| J4 | LDR breakout ("MH Sensor Series" module) | VCC, GND, A0 | 3.3V, GND, GPIO36 - D0 unused, leave disconnected |
 | J5 | Soil moisture probe 1 | VCC, GND, AOUT | 3.3V, GND, GPIO32 |
 | J6 | Soil moisture probe 2 | VCC, GND, AOUT | 3.3V, GND, GPIO33 |
 | J7 | Soil moisture probe 3 | VCC, GND, AOUT | 3.3V, GND, GPIO34 |
@@ -256,24 +256,30 @@ probe specifically, which generalize to the other three sensors too).
 
 ### 1. LDR light sensor
 
-Simple photoresistor voltage divider - no dedicated sensor module needed,
-just an LDR and a fixed resistor.
+Using a ready-made "MH Sensor Series" LDR breakout module (the common
+LM393-comparator photoresistor board) rather than a hand-built divider -
+the LDR itself plugs into the module's own 2-pin screw terminal; the
+module then connects to the perfboard via J4 (VCC/GND/A0 - see the
+connector table above).
 
 ```
-3.3V --- LDR --- [GPIO36] --- 10kΩ resistor --- GND
+Module VCC -> 3.3V
+Module GND -> GND
+Module A0  -> GPIO36 (raw analog divider output - what this firmware reads)
+Module D0  -> not connected (digital threshold output, unused - firmware only reads A0)
 ```
 
-- Darker room → LDR resistance rises → more of the 3.3V drops across the
-  LDR → voltage at GPIO36 falls → lower raw ADC reading.
-- Brighter room → opposite → higher raw ADC reading.
-- If your wiring has the resistor and LDR swapped (resistor on top,
-  LDR on bottom), the relationship inverts - `getLightPercent()`'s
+- `D0` is the board's onboard comparator output (tripped by the trimmer
+  potentiometer on the module) - not read by this firmware at all, only
+  `A0` (the raw analog voltage off the LDR/resistor divider) matters
+  here. Leave `D0` disconnected.
+- Whether a brighter room reads as a higher or lower raw ADC value
+  depends on which side of the divider the module's LDR sits on - this
+  varies by module revision/manufacturer. `getLightPercent()`'s
   auto-ranging (rescales against the min/max seen since boot) reports a
-  sensible 0-100 either way, but "100" would then mean *darkest* instead
-  of *brightest*. Verify against a known light/dark comparison after
-  wiring, don't assume.
-- 10kΩ is a reasonable starting value for a typical CdS photoresistor;
-  exact value isn't critical, it just sets the sensitivity/range.
+  sensible 0-100 either way, but "100" could mean *brightest* on one
+  module and *darkest* on another. Verify against a known light/dark
+  comparison after wiring, don't assume.
 
 **Endpoint**: `GET /sensors/light/read` → `{ sensorId, raw, percent }`.
 Also present in every `/status` response as `light: { raw, percent }`.
