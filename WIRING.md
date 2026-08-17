@@ -156,6 +156,69 @@ state was last persisted to flash (`Preferences`, namespace
 `"actuators"`) - so the very first moments after power-on briefly reflect
 `RELAY_INACTIVE` regardless of the last-known state.
 
+## Devboard: perfboard layout + connector numbering
+
+The physical controller is a hand-built perfboard (stripboard), not a
+custom PCB: an ESP32-WROVER socketed via two strips of female pin
+headers (so the module can be pulled for USB reflashing without
+desoldering anything), a wire harness from the perfboard to the
+8-channel relay module's 10-pin male header, and a set of screw-terminal
+connectors for the sensors. This section numbers those connectors so
+"J3" on the physical board and "J3" in this doc always mean the same
+thing - label the board to match as you build it.
+
+### ESP32 socket
+
+Two female header strips, matching your specific ESP32-WROVER dev
+board's own pin layout - no fixed row/position mapping documented here
+since that depends entirely on which physical board you have (silkscreen
+labels on the board itself are the source of truth for which physical
+pin is which GPIO). Every GPIO number in this document refers to the
+chip's own GPIO numbering, not a header position.
+
+### Relay module harness (no screw terminals - direct wire-to-header)
+
+Standard 8-channel relay module 10-pin header (8x `INn` signal pins +
+`VCC` + `GND`). Wired directly perfboard-to-header (not through a screw
+terminal, since this is one fixed harness rather than a swappable
+sensor):
+
+| Relay module pin | Wire to | Function |
+|---|---|---|
+| VCC | 5V | Relay board logic supply - most 8-channel modules (including boards similar to the HL 58S) want 5V here even if the `INn` signal pins themselves are 3.3V-logic-tolerant; verify against your module's silkscreen/datasheet before powering it |
+| GND | GND | Shared ground |
+| IN1 | GPIO25 | Cooler/exhaust fan (channel 1) |
+| IN2 | GPIO26 | Main light (channel 2) |
+| IN3 | GPIO18 | Dehumidifier (channel 3) |
+| IN4 | GPIO21 | Generic channel 4 (unassigned - name it on System > Actuators once wired to something) |
+| IN5 | GPIO22 | Generic channel 5 (unassigned) |
+| IN6 | GPIO23 | Generic channel 6 (unassigned) |
+| IN7 | *(leave disconnected)* | No GPIO available - see "Pin budget" above |
+| IN8 | *(leave disconnected)* | No GPIO available |
+
+### Sensor screw terminals (J1-J8)
+
+One multi-position screw terminal per sensor, grouping its power/ground/
+signal wires together. Numbered in the same order sensors are documented
+above - renumber freely to match your physical layout, this is just a
+starting scheme.
+
+| # | Sensor | Positions | Wire to |
+|---|---|---|---|
+| J1 | DHT22 | DATA, VCC, GND | GPIO4, GPIO27, GND |
+| J2 | DS18B20 | DATA, VCC, GND | GPIO13 (+ on-board 4.7kΩ pull-up to 3.3V), 3.3V, GND |
+| J3 | MH-Z19B CO2 sensor | VCC, GND, TX, RX | 5V, GND, GPIO14 (ESP32 RX, sensor's TX), GPIO19 (ESP32 TX, sensor's RX) |
+| J4 | LDR light sensor | 2 (or mount the whole divider on-board and skip this connector if the LDR doesn't need to be positioned away from the perfboard) | GPIO36 side, GND side - fixed divider resistor stays on the perfboard either way |
+| J5 | Soil moisture probe 1 | VCC, GND, AOUT | 3.3V, GND, GPIO32 |
+| J6 | Soil moisture probe 2 | VCC, GND, AOUT | 3.3V, GND, GPIO33 |
+| J7 | Soil moisture probe 3 | VCC, GND, AOUT | 3.3V, GND, GPIO34 |
+| J8 | Soil moisture probe 4 | VCC, GND, AOUT | 3.3V, GND, GPIO35 |
+
+Only build the terminals for sensors you're actually installing this
+round - an empty/unpopulated position is harmless, firmware already
+treats a missing sensor as "stale" rather than erroring (see each
+sensor's section above).
+
 ## Known issues fixed by this pin map
 
 - **GPIO16/17 conflict with onboard PSRAM** (fixed by this map - moved to
