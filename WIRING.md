@@ -50,7 +50,7 @@ GND    -> shared ground for every sensor/relay board below
 
 | Pin | Function | Notes |
 |---|---|---|
-| GPIO4 | DHT22 data | Digital one-wire protocol, not analog |
+| GPIO4 | DHT22 data | Digital one-wire protocol, not analog - needs a 5.1kΩ pull-up to VCC (GPIO27) if using a bare sensor with no breakout PCB, see J1 below |
 | GPIO13 | DS18B20 data (OneWire) | Needs an external ~4.7kΩ pull-up resistor between DATA and 3.3V |
 | GPIO14 | CO2 sensor UART2 RX | ESP32 receives - connects to MH-Z19 **TX** |
 | GPIO18 | Dehumidifier relay (channel 3) | Unchanged - no PSRAM conflict |
@@ -205,7 +205,7 @@ starting scheme.
 
 | # | Sensor | Positions | Wire to |
 |---|---|---|---|
-| J1 | DHT22 | DATA, VCC, GND | GPIO4, GPIO27, GND |
+| J1 | DHT22 (bare sensor, no breakout PCB) | DATA, VCC, GND | GPIO4 (+ 5.1kΩ pull-up to VCC/GPIO27 - see note below), GPIO27, GND |
 | J2 | DS18B20 | DATA, VCC, GND | GPIO13 (+ on-board 4.7kΩ pull-up to 3.3V), 3.3V, GND |
 | J3 | MH-Z19 CO2 sensor | VCC, GND, TX, RX | 5V, GND, GPIO14 (ESP32 RX, sensor's TX), GPIO19 (ESP32 TX, sensor's RX) |
 | J4 | LDR breakout module | VCC, GND, A0 | 3.3V, GND, GPIO36 |
@@ -213,6 +213,16 @@ starting scheme.
 | J6 | Soil moisture probe 2 | VCC, GND, AOUT | 3.3V, GND, GPIO33 |
 | J7 | Soil moisture probe 3 | VCC, GND, AOUT | 3.3V, GND, GPIO34 |
 | J8 | Soil moisture probe 4 | VCC, GND, AOUT | 3.3V, GND, GPIO35 |
+
+**DHT22 pull-up note**: like the DS18B20, the DHT22's single-wire
+protocol is an open-drain bus and needs a pull-up resistor (5.1kΩ is the
+commonly recommended value; 4.7k-10k all work fine) between DATA and
+VCC to hold the line high when idle - without it, reads are unreliable
+or fail outright. Most cheap DHT22 **breakout modules** (small PCB, 3-pin
+header) already have this resistor soldered on, so nothing extra is
+needed for those. A **bare DHT22** (no breakout PCB) has no pull-up
+anywhere - add a 5.1kΩ resistor across DATA (GPIO4) and VCC (GPIO27) at
+J1, same idea/placement as the DS18B20's at J2.
 
 Only build the terminals for sensors you're actually installing this
 round - an empty/unpopulated position is harmless, firmware already
