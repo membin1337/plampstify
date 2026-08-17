@@ -4,6 +4,16 @@ Tracks `FIRMWARE_VERSION` (`include/config.h`) - bumped manually on each
 firmware build/flash, exposed via `/health-check` so the client's Debug
 box can show which firmware is actually running. Newest first.
 
+## 0.3.2 - 2026-08-16
+New `DEVBOARD_REVISION` (`config.h`), exposed via `/health-check`
+alongside `firmwareVersion` - identifies which physical wiring this
+firmware build expects, bumped by hand whenever the board's wiring
+changes (not on every firmware release). Starts at `"1"` for the
+perfboard devboard documented in WIRING.md's new "Devboard revision
+history" section. Lets a firmware/board mismatch (e.g. GPIO25/26 relay
+pins flashed onto a board still wired the old GPIO16/17 way) be
+diagnosed remotely instead of only by opening the case.
+
 ## 0.3.1 - 2026-08-16
 Generic relay channels 4-6 (`relay_channels.cpp`, GPIO21/22/23 - see
 WIRING.md's "Relay channels" section) - plain manual on/off, same shape

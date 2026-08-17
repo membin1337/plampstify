@@ -106,9 +106,10 @@ void handleSettingsPost(AsyncWebServerRequest* request) {
 }
 
 void handleHealthCheck(AsyncWebServerRequest* request) {
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<320> doc;
   doc["status"] = "OK";
   doc["firmwareVersion"] = FIRMWARE_VERSION;
+  doc["devboardRevision"] = DEVBOARD_REVISION;
   // Actual boot time (see boot_time.cpp) rather than a hardcoded
   // compile-time constant - the latter only ever reflected when the
   // source was written, not when it was actually flashed onto a given

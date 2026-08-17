@@ -219,6 +219,31 @@ round - an empty/unpopulated position is harmless, firmware already
 treats a missing sensor as "stale" rather than erroring (see each
 sensor's section above).
 
+### Devboard revision history
+
+`DEVBOARD_REVISION` (`include/config.h`) identifies which physical
+wiring a given firmware build expects - bumped by hand whenever the
+board's wiring changes in a firmware-relevant way (a new relay/sensor
+pin), not on every firmware release. Exposed via `/health-check`
+alongside `firmwareVersion`, and shown in plampControlCenter's Debug
+panel - check both when something seems wired wrong, since a firmware
+flash and a physical rewire don't always happen in the same sitting.
+
+| Devboard rev | What it is | Compatible firmware |
+|---|---|---|
+| 1 | The perfboard devboard documented in this section: ESP32 socketed via female headers, relay module harness on GPIO25/26/18 (+ 21/22/23 for channels 4-6), numbered screw terminals J1-J8 for sensors | v0.3.1+ (the `DEVBOARD_REVISION` constant itself is only reported starting v0.3.2 - the physical wiring it names was already correct as of v0.3.1) |
+| 0 (legacy, undocumented construction) | Whatever the device was physically wired as before this perfboard build - relays on GPIO16/17/18, DHT22 permanently powered off the 3.3V rail, no sensors beyond the DHT22. See "What's physically wired today" below for the exact pin map. | v0.2.x and earlier |
+
+Rev 0 → rev 1 is the same physical migration described in "Migration
+checklist" below - there's no rev in between, since the relay-pin move
+and the new sensor terminals were designed and built together.
+
+**When you next change the physical board** (add relay channels 7/8 via
+an I2C expander, drop a sensor, move a connector): bump
+`DEVBOARD_REVISION` to `"2"`, add a row here describing what changed,
+and note the firmware version it first shipped in - same pattern as
+`CHANGELOG.md`, just for hardware instead of code.
+
 ## Known issues fixed by this pin map
 
 - **GPIO16/17 conflict with onboard PSRAM** (fixed by this map - moved to

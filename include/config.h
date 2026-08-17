@@ -12,7 +12,21 @@
 // it (confirmed as a real, confusing bug in practice on 2026-08-15 - a
 // device showed "updated 14 hours ago" right after being flashed, because
 // that's how long it had been since the commit, not the flash).
-#define FIRMWARE_VERSION "0.3.1"
+#define FIRMWARE_VERSION "0.3.2"
+
+// Identifies which physical devboard revision this firmware expects to
+// be running on - GPIO assignments are only meaningful in the context of
+// a specific physical wiring, so a firmware/board mismatch (e.g. this
+// firmware's GPIO25/26 relay pins flashed onto a board still wired the
+// old GPIO16/17 way) is a real, easy-to-make mistake, not just a version
+// number mismatch. Bump this by hand whenever the physical board's
+// wiring changes in a way firmware needs to know about (a new relay/
+// sensor pin assignment) - not on every firmware change, most of those
+// don't touch wiring at all. See WIRING.md's "Devboard revision history"
+// for what each revision actually changed and which firmware versions
+// it's compatible with. Exposed via /health-check next to
+// FIRMWARE_VERSION, same reasoning as that constant.
+#define DEVBOARD_REVISION "1"
 
 // Relay GPIO pins. Moved off GPIO16/17 (2026-08-16) - those are the two
 // pins ESP32-WROVER modules use internally for the onboard PSRAM chip's
