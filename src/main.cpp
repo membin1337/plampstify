@@ -6,9 +6,13 @@
 #include "api_routes.h"
 #include "automation.h"
 #include "boot_time.h"
+#include "co2_sensor.h"
 #include "config.h"
+#include "light_sensor.h"
 #include "sensors.h"
 #include "server_report.h"
+#include "soil_moisture.h"
+#include "water_temp.h"
 #include "wifi_manager.h"
 
 AsyncWebServer server(80);
@@ -27,6 +31,10 @@ void setup() {
   initActuators();
   initAutomation();
   initSensors();
+  initLightSensor();
+  initWaterTemp();
+  initCo2Sensor();
+  initSoilMoisture();
   // Reads the NVS-cached apiHost before initWiFi() so it's ready before
   // loop()'s first pollServerReport() call can ever see
   // wifiJustReconnected() true (that first connect itself happens
@@ -57,4 +65,12 @@ void loop() {
     const SensorReading& reading = getLastSensorReading();
     evaluateVentAutomation(reading.temperature.toFloat(), reading.humidity.toFloat());
   }
+
+  // Each of these debounces itself against its own interval (see
+  // config.h) - safe to call unconditionally every loop() iteration,
+  // same as pollSensors() above.
+  pollLightSensor();
+  pollWaterTemp();
+  pollCo2Sensor();
+  pollSoilMoisture();
 }

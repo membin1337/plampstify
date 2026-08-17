@@ -5,10 +5,14 @@
 #include "actuators.h"
 #include "automation.h"
 #include "boot_time.h"
+#include "co2_sensor.h"
 #include "config.h"
+#include "light_sensor.h"
 #include "secrets.h"
 #include "sensors.h"
 #include "server_report.h"
+#include "soil_moisture.h"
+#include "water_temp.h"
 #include "wifi_manager.h"
 
 namespace {
@@ -127,6 +131,76 @@ void handleSensorRead(AsyncWebServerRequest* request) {
   sendJson(request, doc);
 }
 
+// --- New sensors (2026-08-16, see WIRING.md) - each follows /sensors/1/
+// read's shape, and is also folded into handleStatus() below so
+// poller.js picks all of them up in the one /status request per cycle it
+// already makes, matching this file's existing "single request per
+// cycle" convention rather than adding N more round trips against the
+// device's own limited connection pool.
+
+void handleLightSensorRead(AsyncWebServerRequest* request) {
+  StaticJsonDocument<128> doc;
+  doc["sensorId"] = "ldr1";
+  doc["raw"] = getLightRaw();
+  doc["percent"] = getLightPercent();
+  sendJson(request, doc);
+}
+
+void handleWaterTempRead(AsyncWebServerRequest* request) {
+  StaticJsonDocument<128> doc;
+  doc["sensorId"] = "water1";
+  float tempC = getWaterTempC();
+  if (!isnan(tempC)) doc["temperatureC"] = tempC;
+  doc["status"] = isWaterTempHealthy() ? "ok" : "stale";
+  sendJson(request, doc);
+}
+
+void handleCo2Read(AsyncWebServerRequest* request) {
+  StaticJsonDocument<128> doc;
+  doc["sensorId"] = "co2_1";
+  int ppm = getCO2ppm();
+  if (ppm >= 0) doc["ppm"] = ppm;
+  doc["status"] = isCo2SensorHealthy() ? "ok" : "stale";
+  sendJson(request, doc);
+}
+
+void handleSoilMoistureRead(AsyncWebServerRequest* request) {
+  StaticJsonDocument<384> doc;
+  JsonArray readings = doc.createNestedArray("readings");
+  for (int i = 0; i < SOIL_MOISTURE_PIN_COUNT; i++) {
+    JsonObject obj = readings.createNestedObject();
+    obj["sensorId"] = "soil" + String(i + 1);
+    obj["raw"] = getSoilMoistureRaw(i);
+    obj["percent"] = getSoilMoisturePercent(i);
+  }
+  sendJson(request, doc);
+}
+
+// POST /sensors/soil/calibrate?index=0..3&point=dry|wet - captures the
+// channel's current reading as its dry or wet reference point. Query
+// params (not a JSON body) to match this file's existing ?state=on|off
+// convention for simple single-value writes.
+void handleSoilCalibrate(AsyncWebServerRequest* request) {
+  int index = request->hasParam("index") ? request->getParam("index")->value().toInt() : -1;
+  String point = request->hasParam("point") ? request->getParam("point")->value() : "";
+
+  if (index < 0 || index >= SOIL_MOISTURE_PIN_COUNT || (point != "dry" && point != "wet")) {
+    AsyncWebServerResponse* response = request->beginResponse(400, "application/json",
+      "{\"error\":\"index (0-3) and point (dry|wet) query params required\"}");
+    request->send(response);
+    return;
+  }
+
+  if (point == "dry") calibrateSoilDry(index);
+  else calibrateSoilWet(index);
+
+  StaticJsonDocument<128> doc;
+  doc["sensorId"] = "soil" + String(index + 1);
+  doc["raw"] = getSoilMoistureRaw(index);
+  doc["percent"] = getSoilMoisturePercent(index);
+  sendJson(request, doc);
+}
+
 void handleLightRead(AsyncWebServerRequest* request) {
   StaticJsonDocument<128> doc;
   doc["status"] = getLightStatus() ? "ON" : "OFF";
@@ -192,7 +266,7 @@ void handleDehumidifierSwitch(AsyncWebServerRequest* request) {
 }
 
 void handleStatus(AsyncWebServerRequest* request) {
-  StaticJsonDocument<384> doc;
+  StaticJsonDocument<768> doc;
   doc["coolerStatus"] = getCoolerStatus() ? "ON" : "OFF";
   doc["coolerTempAutoMode"] = getVentTemperatureAuto();
   doc["coolerHumidityAutoMode"] = getVentHumidityAuto();
@@ -211,6 +285,34 @@ void handleStatus(AsyncWebServerRequest* request) {
   sensorObj["timestamp"] = reading.timestamp;
   sensorObj["status"] = isSensorHealthy() ? "ok" : "stale";
   sensorObj["lastReadAgeMs"] = getSensorLastReadAgeMs();
+
+  // New sensors (2026-08-16) - present in every /status response so
+  // poller.js doesn't need a second round trip to pick them up. plamp-api
+  // doesn't parse/store these yet (firmware-only groundwork so far, see
+  // plampControlCenter's TODO.md) - present regardless, harmless extra
+  // fields until that catches up.
+  JsonObject light = doc.createNestedObject("light");
+  light["raw"] = getLightRaw();
+  light["percent"] = getLightPercent();
+
+  JsonObject waterTemp = doc.createNestedObject("waterTemp");
+  float tempC = getWaterTempC();
+  if (!isnan(tempC)) waterTemp["temperatureC"] = tempC;
+  waterTemp["status"] = isWaterTempHealthy() ? "ok" : "stale";
+
+  JsonObject co2 = doc.createNestedObject("co2");
+  int ppm = getCO2ppm();
+  if (ppm >= 0) co2["ppm"] = ppm;
+  co2["status"] = isCo2SensorHealthy() ? "ok" : "stale";
+
+  JsonArray soil = doc.createNestedArray("soil");
+  for (int i = 0; i < SOIL_MOISTURE_PIN_COUNT; i++) {
+    JsonObject obj = soil.createNestedObject();
+    obj["sensorId"] = "soil" + String(i + 1);
+    obj["raw"] = getSoilMoistureRaw(i);
+    obj["percent"] = getSoilMoisturePercent(i);
+  }
+
   sendJson(request, doc);
 }
 
@@ -237,10 +339,11 @@ void handleServerAddress(AsyncWebServerRequest* request) {
   sendJson(request, doc);
 }
 
-// The 5 routes that actually change device state - actuator switches,
-// vent settings, and the server-reported address. Checked by method+path
-// together, not path alone, since /settings is registered under both
-// GET (read) and POST (write) - see registerRoutes below.
+// The routes that actually change device state - actuator switches, vent
+// settings, soil-moisture calibration, and the server-reported address.
+// Checked by method+path together, not path alone, since /settings is
+// registered under both GET (read) and POST (write) - see registerRoutes
+// below.
 bool isWriteRoute(AsyncWebServerRequest* request) {
   const String& url = request->url();
   int method = request->method();
@@ -249,6 +352,7 @@ bool isWriteRoute(AsyncWebServerRequest* request) {
   if (method == HTTP_PUT && url == "/actuators/fan/switch") return true;
   if (method == HTTP_PUT && url == "/actuators/dehumidifier/switch") return true;
   if (method == HTTP_POST && url == "/server-address") return true;
+  if (method == HTTP_POST && url == "/sensors/soil/calibrate") return true;
   return false;
 }
 
@@ -342,4 +446,14 @@ void registerRoutes(AsyncWebServer& server) {
   server.on("/actuators/dehumidifier/switch", HTTP_PUT, handleDehumidifierSwitch);
   server.on("/status", HTTP_GET, handleStatus);
   server.on("/server-address", HTTP_POST, handleServerAddress);
+
+  // New sensors (2026-08-16, see WIRING.md) - also folded into /status
+  // above; these dedicated routes exist for the same reason
+  // /sensors/1/read does alongside /status (ad hoc reads/debugging
+  // without waiting for a full status document).
+  server.on("/sensors/light/read", HTTP_GET, handleLightSensorRead);
+  server.on("/sensors/water-temp/read", HTTP_GET, handleWaterTempRead);
+  server.on("/sensors/co2/read", HTTP_GET, handleCo2Read);
+  server.on("/sensors/soil/read", HTTP_GET, handleSoilMoistureRead);
+  server.on("/sensors/soil/calibrate", HTTP_POST, handleSoilCalibrate);
 }

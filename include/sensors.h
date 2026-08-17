@@ -27,3 +27,8 @@ bool isSensorHealthy();
 // ms since the last good read, or -1 if there's never been one.
 long getSensorLastReadAgeMs();
 int getSensorConsecutiveFailures();
+// How many times pollSensors() has power-cycled DHT_POWER_PIN trying to
+// clear a wedge since boot - exposed mainly for /health-check, so a
+// pattern of repeated power-cycles (as opposed to zero, or one that then
+// recovered) is visible without digging through serial logs.
+int getSensorPowerCycleCount();

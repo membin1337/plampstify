@@ -2,33 +2,73 @@
 
 Physical wiring reference for the plamp controller - ESP32-**WROVER**
 module (`board = esp-wrover-kit` in `platformio.ini`), 3-channel relay
-board (HL 58S v1.2), and a DHT22 temperature/humidity sensor. Pin
+board (HL 58S v1.2), a DHT22 temperature/humidity sensor, and (new,
+2026-08-16) an LDR light sensor, a DS18B20 waterproof temperature probe,
+an MH-Z19B CO2 sensor, and up to 4 capacitive soil-moisture probes. Pin
 assignments below are pulled directly from `include/config.h` - if this
 doc and `config.h` ever disagree, `config.h` is the source of truth and
 this doc is stale.
 
-## Current wiring (as of firmware v0.2.0)
+## ⚠️ Status: firmware ahead of the physical wiring
+
+As of firmware v0.3.0, `config.h` targets the **pin map below**, which
+moves the cooler/light relays off GPIO16/17 and adds pins for every new
+sensor. **The physical device has very likely not been rewired yet** -
+see "What's physically wired today" further down for the old map it was
+last confirmed running. **Do not flash v0.3.0+ onto a device still wired
+the old way** - the cooler and light relays would end up on the wrong
+GPIOs and stop responding entirely (this pin conflict is itself what was
+suspected to be causing the fan/light to already be unresponsive - see
+plampControlCenter's TODO.md). Work through the "Migration checklist"
+section below in order: rewire first, flash second.
+
+## Target pin map (firmware v0.3.0+)
 
 ```
-GPIO16 -> RELAY CH1 -> COOLER/EXHAUST FAN
-GPIO17 -> RELAY CH2 -> MAIN LIGHT
-GPIO18 -> RELAY CH3 -> DEHUMIDIFIER
 GPIO4  -> DHT22 DATA (digital, single-wire protocol - not an analog input)
-3.3V   -> DHT22 VCC (always powered - firmware can't power-cycle the sensor)
-GND    -> DHT22 GND
+GPIO13 -> DS18B20 DATA (digital, OneWire protocol) - needs an external 4.7k pull-up to 3.3V
+GPIO14 -> CO2 sensor UART2 RX (ESP32 receives - wire to the MH-Z19B's TX pin)
+GPIO18 -> RELAY CH3 -> DEHUMIDIFIER (unchanged)
+GPIO19 -> CO2 sensor UART2 TX (ESP32 transmits - wire to the MH-Z19B's RX pin)
+GPIO25 -> RELAY CH1 -> COOLER/EXHAUST FAN (moved off GPIO16)
+GPIO26 -> RELAY CH2 -> MAIN LIGHT (moved off GPIO17)
+GPIO27 -> DHT22 VCC (moved off the 3.3V rail - lets firmware hard power-cycle the sensor)
+GPIO32 -> SOIL MOISTURE PROBE #1 (analog input, ADC1)
+GPIO33 -> SOIL MOISTURE PROBE #2 (analog input, ADC1)
+GPIO34 -> SOIL MOISTURE PROBE #3 (analog input, ADC1, input-only pin)
+GPIO35 -> SOIL MOISTURE PROBE #4 (analog input, ADC1, input-only pin)
+GPIO36 -> LDR LIGHT SENSOR (analog input, ADC1, input-only pin - labeled "SVP" on most WROVER boards)
+GPIO39 -> reserved / spare ADC1 channel (labeled "SVN")
+3.3V   -> DHT22 GND reference removed - see DHT22 GND below; also powers LDR divider, DS18B20, soil probes
+GND    -> shared ground for every sensor/relay board below
 ```
 
 | Pin | Function | Notes |
 |---|---|---|
-| GPIO16 | Cooler/exhaust fan relay (channel 1) | ⚠️ Also used internally by ESP32-**WROVER** modules for the onboard PSRAM chip's CS line - see "Known issues" below |
-| GPIO17 | Main light relay (channel 2) | ⚠️ Also used internally for the PSRAM chip's CLK line |
-| GPIO18 | Dehumidifier relay (channel 3) | No known conflict |
 | GPIO4 | DHT22 data | Digital one-wire protocol, not analog |
-| 3.3V rail | DHT22 VCC | Always powered - firmware can't power-cycle the sensor |
-| GND | DHT22 GND | |
+| GPIO13 | DS18B20 data (OneWire) | Needs an external ~4.7kΩ pull-up resistor between DATA and 3.3V |
+| GPIO14 | CO2 sensor UART2 RX | ESP32 receives - connects to MH-Z19B **TX** |
+| GPIO18 | Dehumidifier relay (channel 3) | Unchanged - no PSRAM conflict |
+| GPIO19 | CO2 sensor UART2 TX | ESP32 transmits - connects to MH-Z19B **RX** |
+| GPIO25 | Cooler/exhaust fan relay (channel 1) | Moved off GPIO16 to clear the PSRAM conflict |
+| GPIO26 | Main light relay (channel 2) | Moved off GPIO17 |
+| GPIO27 | DHT22 VCC | Moved off the 3.3V rail - firmware can now hard power-cycle just the sensor after a wedge |
+| GPIO32 | Soil moisture probe #1 (analog) | ADC1 - safe to read with WiFi connected |
+| GPIO33 | Soil moisture probe #2 (analog) | ADC1 |
+| GPIO34 | Soil moisture probe #3 (analog) | ADC1, input-only (fine for a read-only sensor) |
+| GPIO35 | Soil moisture probe #4 (analog) | ADC1, input-only |
+| GPIO36 | LDR light sensor (analog) | ADC1, input-only, labeled "SVP" on most WROVER boards |
+| GND | Shared ground | Every relay/sensor below shares this with the ESP32 |
 
-No other GPIOs are in use by this firmware today (no buttons, status
-LEDs, or additional sensors wired up).
+No other GPIOs are in use by this firmware.
+
+⚠️ **ADC1 vs ADC2**: every analog sensor above (LDR + 4x soil) is
+deliberately on an **ADC1** pin (the GPIO32-39 range). ESP32's ADC2
+peripheral shares hardware with the WiFi radio and produces unreliable
+readings whenever WiFi is connected - a well-known ESP32 limitation, not
+specific to this project. Don't move any analog sensor onto an ADC2 pin
+(GPIO0, 2, 4, 12-15, 25-27) even though some of those look "free" - most
+of them are already claimed by something else above anyway.
 
 ### Relay polarity
 
@@ -47,78 +87,216 @@ state was last persisted to flash (`Preferences`, namespace
 `"actuators"`) - so the very first moments after power-on briefly reflect
 `RELAY_INACTIVE` regardless of the last-known state.
 
-## Known issues
+## Known issues fixed by this pin map
 
-- **GPIO16/17 conflict with onboard PSRAM.** Driving GPIO16/17 as generic
-  relay outputs while the WROVER module's PSRAM chip is using them
-  internally for its own SPI-like CS/CLK lines is a documented
-  ESP32-WROVER gotcha, and a plausible source of broad system-level
-  instability (not just those two relay channels). Live-suspected as the
-  cause of the fan/light being unresponsive to switch commands on
-  2026-08-16 (see plampControlCenter's TODO.md). Not yet fixed - needs
-  the physical rewire in "Proposed wiring" below.
-- **DHT22 brownout wedge.** WiFi TX current spikes can dip the sensor's
-  3.3V-rail supply enough to lock it up; only a genuine power cycle
-  clears it (a soft `ESP.restart()` doesn't, since the sensor stays
-  continuously powered across that). Confirmed via a manual power cycle
-  on 2026-07-23. Not yet fixed - see "Proposed wiring" below.
+- **GPIO16/17 conflict with onboard PSRAM** (fixed by this map - moved to
+  GPIO25/26). Driving GPIO16/17 as generic relay outputs while the
+  WROVER module's PSRAM chip is using them internally for its own
+  SPI-like CS/CLK lines is a documented ESP32-WROVER gotcha, and the
+  live-suspected cause of the fan/light being unresponsive to switch
+  commands on 2026-08-16 (relay confirmed not clicking on switch, no
+  software cause found - see plampControlCenter's TODO.md).
+- **DHT22 brownout wedge** (fixed by this map + firmware logic). WiFi TX
+  current spikes can dip the sensor's supply enough to lock it up; only
+  cutting power actually clears it. Moving VCC to GPIO27 lets
+  `sensors.cpp` hard power-cycle the sensor automatically after
+  `DHT_POWER_CYCLE_THRESHOLD_MS` (5 min) of no good read, with a full
+  device restart as a last resort after `DHT_RESTART_THRESHOLD_MS`
+  (~20 min) if even that doesn't clear it. Confirmed as a real failure
+  mode via a manual power cycle on 2026-07-23.
 
-## Proposed wiring (fixes both known issues above)
+**Still open, not addressed by this pass**: a real EC probe and CO2
+*supplementation* control (as opposed to just *reading* CO2, which this
+pass adds) remain unimplemented - EC is still a manual log entry in
+plampControlCenter. See TODO.md idea #5.
 
-Not implemented yet - `config.h` still reflects "Current wiring" above.
+## New sensors
+
+Each of these is implemented in firmware (`src/light_sensor.cpp`,
+`src/water_temp.cpp`, `src/co2_sensor.cpp`, `src/soil_moisture.cpp`) and
+exposed over HTTP (folded into `/status`, plus its own dedicated read
+route - see each section). **plamp-api does not parse or store any of
+these readings yet** - this pass is firmware-only groundwork. Wiring
+plamp-api/the frontend up to actually chart and alert on them is a
+separate follow-up (see plampControlCenter's TODO.md and
+`SOIL_MOISTURE_SENSOR.md`'s own already-scoped sections 6-7 for the soil
+probe specifically, which generalize to the other three sensors too).
+
+### 1. LDR light sensor
+
+Simple photoresistor voltage divider - no dedicated sensor module needed,
+just an LDR and a fixed resistor.
+
+```
+3.3V --- LDR --- [GPIO36] --- 10kΩ resistor --- GND
+```
+
+- Darker room → LDR resistance rises → more of the 3.3V drops across the
+  LDR → voltage at GPIO36 falls → lower raw ADC reading.
+- Brighter room → opposite → higher raw ADC reading.
+- If your wiring has the resistor and LDR swapped (resistor on top,
+  LDR on bottom), the relationship inverts - `getLightPercent()`'s
+  auto-ranging (rescales against the min/max seen since boot) reports a
+  sensible 0-100 either way, but "100" would then mean *darkest* instead
+  of *brightest*. Verify against a known light/dark comparison after
+  wiring, don't assume.
+- 10kΩ is a reasonable starting value for a typical CdS photoresistor;
+  exact value isn't critical, it just sets the sensitivity/range.
+
+**Endpoint**: `GET /sensors/light/read` → `{ sensorId, raw, percent }`.
+Also present in every `/status` response as `light: { raw, percent }`.
+
+### 2. DS18B20 waterproof temperature probe
+
+For reservoir/nutrient water temperature. 3-wire (non-parasitic power)
+wiring:
+
+```
+DS18B20 red   (VCC)  -> 3.3V
+DS18B20 black (GND)  -> GND
+DS18B20 yellow(DATA) -> GPIO13, with a 4.7kΩ pull-up resistor from GPIO13 to 3.3V
+```
+
+Wire colors above match the common waterproof DS18B20 probe (black/red/
+yellow) - **verify against your actual probe**, colors aren't
+standardized across manufacturers. The 4.7kΩ pull-up is required
+(OneWire is an open-drain bus) - without it, reads will fail or return
+garbage/85°C default values.
+
+**Endpoint**: `GET /sensors/water-temp/read` → `{ sensorId, temperatureC,
+status }` (`temperatureC` omitted until the first successful read).
+Also present in every `/status` response as `waterTemp: { temperatureC,
+status }`.
+
+### 3. MH-Z19B CO2 sensor
+
+NDIR sensor, UART interface. ⚠️ **Power**: the MH-Z19B needs **5V**, not
+3.3V (verify against your specific module's datasheet/silkscreen before
+wiring) - but its UART TX/RX pins are 3.3V-logic-level safe per the
+datasheet, so they connect directly to the ESP32's GPIOs with no level
+shifter needed. Double-check this against your exact module before
+connecting; a genuine 5V-logic UART into an ESP32 GPIO can damage it.
+
+```
+MH-Z19B VCC -> 5V (NOT 3.3V)
+MH-Z19B GND -> GND
+MH-Z19B TX  -> GPIO14 (ESP32 UART2 RX)
+MH-Z19B RX  -> GPIO19 (ESP32 UART2 TX)
+```
+
+Automatic baseline calibration (ABC) is disabled in firmware
+(`mhz19.autoCalibration(false)` in `co2_sensor.cpp`) - ABC assumes the
+sensor sees genuine fresh outdoor air (~400ppm) at least once every 24h
+and silently recalibrates its zero point to the lowest reading seen in
+that window. A sealed grow tent deliberately never does that (CO2
+supplementation keeps it elevated), so ABC would permanently drift the
+sensor's calibration downward over time. If you ever need to manually
+zero-calibrate the sensor (e.g. after moving it to fresh air), that's a
+firmware feature not yet built - the `MHZ19` library supports it
+(`calibrateZero()`) if needed later.
+
+**Endpoint**: `GET /sensors/co2/read` → `{ sensorId, ppm, status }` (`ppm`
+omitted until the first successful read). Also present in every `/status`
+response as `co2: { ppm, status }`.
+
+### 4. Capacitive soil moisture probes (up to 4)
+
+Each channel is a plain analog voltage input - works identically whether
+the probe behind it is a **commercial capacitive soil moisture module**
+(cheap, common, 3-pin VCC/GND/AOUT boards) or a **DIY potted 555-circuit
+probe** (see `SOIL_MOISTURE_SENSOR.md` for the full DIY design, written
+up after a previous resistive/cheap-capacitive probe corroded and died -
+worth reading before buying another commercial one).
+
+```
+Probe #1 AOUT -> GPIO32
+Probe #2 AOUT -> GPIO33
+Probe #3 AOUT -> GPIO34
+Probe #4 AOUT -> GPIO35
+Probe VCC     -> 3.3V (see power note below)
+Probe GND     -> GND
+```
+
+**Power note**: many commercial capacitive modules are rated 3.3-5.5V and
+work at either voltage, but produce a **stronger/more linear signal at
+5V**. Powering at 3.3V is the simple/safe default here - the ESP32's ADC
+only reads up to ~3.3V, so a 5V-powered probe's output would need its own
+voltage divider before reaching an ADC pin (extra parts, one per
+channel). Start with 3.3V; only move to 5V+divider later if the 3.3V
+signal range turns out too compressed to calibrate reliably.
+
+Fewer than 4 probes is fine - unused channels just read a fixed
+raw/floating value near 0 or 4095 depending on the pin's pull state, and
+`getSoilMoisturePercent()` for an uncalibrated channel returns 0.
+
+**Calibration** (per channel, persisted to flash): with the probe in the
+condition below, call the endpoint - it captures *that moment's* raw
+reading as the reference point.
+
+- Dry: `POST /sensors/soil/calibrate?index=0&point=dry` (probe in open
+  air or bone-dry soil)
+- Wet: `POST /sensors/soil/calibrate?index=0&point=wet` (probe fully
+  submerged in water)
+
+`index` is 0-3 (probe #1 = index 0, etc.). Requires the `X-Device-Key`
+header like every other write route (see `secrets.h`'s
+`DEVICE_API_KEY`) - not reachable from a browser directly, goes through
+plamp-api the same as an actuator switch.
+
+**Endpoint**: `GET /sensors/soil/read` → `{ readings: [{ sensorId, raw,
+percent }, ...] }`, one entry per channel. Also present in every
+`/status` response as a `soil` array, same shape.
+
+## Migration checklist
+
+Physical wiring changes AND firmware pin changes together - do them in
+this order, don't flash ahead of the rewire.
+
+1. **Power off the device.**
+2. **Rewire the existing relays/DHT22**: cooler relay signal from GPIO16
+   → GPIO25, light relay signal from GPIO17 → GPIO26, DHT22 VCC from the
+   3.3V pin → GPIO27. Add a 100-470µF electrolytic + 0.1µF ceramic
+   capacitor in parallel across the DHT22's VCC/GND while it's already
+   disconnected (absorbs WiFi TX current spikes so the brownout wedge
+   ideally never happens in the first place - zero firmware/pin change on
+   top of the GPIO27 move, just added at the sensor).
+3. **Wire whichever new sensors you're adding this round** (LDR/DS18B20/
+   CO2/soil - each section above), or skip any you don't have hardware
+   for yet. Firmware handles a missing sensor gracefully (stays
+   "stale"/unreported), so it's fine to wire these incrementally rather
+   than all at once.
+4. **Flash over USB first** (`pio run -e esp-wrover-kit -t upload`) - a
+   `config.h` pin change needs a full rebuild+upload; OTA
+   (`esp-wrover-kit-ota` env) is fine again for every upload after this
+   one.
+5. **Verify**: `/health-check`'s `sensorOk`/`sensorConsecutiveFailures`
+   look healthy, light/fan/dehumidifier still toggle correctly from the
+   app, and `/status` shows sensible values for whichever new sensors you
+   wired (a wired-but-uncalibrated soil probe reading 0% is expected
+   until you calibrate it; an unwired CO2/water-temp sensor correctly
+   shows `status: "stale"` forever, not a crash).
+6. **Calibrate any soil probes** wired (see "Capacitive soil moisture
+   probes" above).
+7. ⚠️ **Verify GPIO25/26/27/13/14/19/32-36 against your specific
+   WROVER-KIT board revision before wiring anything.** The dev *board*
+   (as opposed to the WROVER *module*) can break some GPIOs out to a
+   camera header/JTAG on official Espressif kits, and the exact mapping
+   differs between hardware revisions - this project's board has GPIO18
+   already confirmed working as a plain relay output in practice, which
+   suggests no camera/JTAG conflict on this specific unit, but verify
+   before committing wiring on the new pins too. If any of these turn out
+   to already be spoken for, GPIO21/22/23 are general-purpose spares not
+   used by this firmware.
+
+## What's physically wired today (pre-rewire, firmware v0.2.0 and earlier)
+
+Kept for reference/rollback until the migration above is actually done.
 
 | Pin | Function | Notes |
 |---|---|---|
-| GPIO25 | Cooler/exhaust fan relay (channel 1) | Moved off GPIO16 to clear the PSRAM conflict |
-| GPIO26 | Main light relay (channel 2) | Moved off GPIO17 |
-| GPIO18 | Dehumidifier relay (channel 3) | Unchanged - no conflict to fix |
-| GPIO4 | DHT22 data | Unchanged |
-| **GPIO27** *(new)* | DHT22 VCC | Moved off the 3.3V rail so firmware can hard power-cycle just the sensor (GPIO low → delay → GPIO high → re-`dht.begin()`) after N minutes of no good read |
-| GND | DHT22 GND | Unchanged |
-| *(physical only, no pin)* | 100-470µF electrolytic + 0.1µF ceramic capacitor in parallel across DHT22 VCC/GND, right at the sensor | Absorbs WiFi TX current spikes so the brownout wedge ideally never happens in the first place - zero firmware/pin change, just added at the sensor |
-
-### Why these GPIOs
-
-- **GPIO25-27** are general-purpose pins on the base ESP32-WROVER module:
-  not on the SPI flash bus (GPIO6-11 - never touch these), not boot
-  strapping pins (GPIO0/2/5/12/15), and not input-only (GPIO34-39).
-- ⚠️ **Verify against your specific WROVER-KIT board revision before
-  wiring.** The dev *board* (as opposed to the WROVER *module*) also
-  breaks some GPIOs out to a camera header and JTAG, and the exact
-  camera pin mapping differs between hardware revisions (v3 vs v4.1). If
-  GPIO25/26/27 turn out to already be spoken for on your board, any of
-  **GPIO13, GPIO14, GPIO32, GPIO33** are equally valid substitutes - none
-  are used by this firmware today.
-- Putting DHT22 VCC on its own dedicated GPIO (rather than reusing a
-  relay pin) keeps the sensor power-cycle logic fully independent of
-  cooler/light/dehumidifier state - resetting a jammed sensor never
-  touches actuator outputs.
-
-### Reserved for future sensors
-
-The soil-moisture probe design (see `SOIL_MOISTURE_SENSOR.md`, design
-only, not implemented) earmarks **GPIO33** (touch-capable, `T9`) as its
-recommended pin, specifically avoiding GPIO27 (reserved for DHT22 VCC
-above) and GPIO4 (DHT22 data). Keep both reservations in mind before
-claiming GPIO27/GPIO33/GPIO4 for anything else.
-
-## Migration checklist (proposed wiring, not yet done)
-
-1. **Rewire physically** (device powered off): cooler relay signal from
-   GPIO16 → GPIO25, light relay signal from GPIO17 → GPIO26, DHT22 VCC
-   from the 3.3V pin → GPIO27. Add the bulk capacitor across the DHT22's
-   VCC/GND at the same time, while it's already disconnected.
-2. **Update `include/config.h`**: change `COOLER_PIN`/`MAIN_LIGHT_PIN` to
-   the new values, add a `DHT_POWER_PIN 27` define.
-3. **Add the power-cycle firmware logic** (not yet implemented - see
-   plampControlCenter's TODO.md): drive `DHT_POWER_PIN` high at boot, and
-   after `DHT_STALE_THRESHOLD_MS` of no good read, pulse it low → delay →
-   high and call `dht.begin()` again.
-4. **Flash over USB first** - a `config.h` pin change needs a full
-   rebuild+upload; OTA (`esp-wrover-kit-ota` env) is fine again for every
-   upload after that one.
-5. **Verify**: `/health-check`'s `sensorOk`/`sensorConsecutiveFailures`
-   look healthy, and light/fan/dehumidifier still toggle correctly from
-   the app after the rewire.
-6. **Update this doc**: move the "Proposed wiring" table up into
-   "Current wiring" once the rewire is done and verified.
+| GPIO16 | Cooler/exhaust fan relay (channel 1) | ⚠️ PSRAM conflict - see "Known issues" above |
+| GPIO17 | Main light relay (channel 2) | ⚠️ PSRAM conflict |
+| GPIO18 | Dehumidifier relay (channel 3) | No conflict - unchanged in the new map too |
+| GPIO4 | DHT22 data | Unchanged in the new map too |
+| 3.3V rail | DHT22 VCC | Always powered - firmware couldn't power-cycle the sensor with this wiring |
+| GND | DHT22 GND | |

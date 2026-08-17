@@ -12,16 +12,19 @@
 // it (confirmed as a real, confusing bug in practice on 2026-08-15 - a
 // device showed "updated 14 hours ago" right after being flashed, because
 // that's how long it had been since the commit, not the flash).
-#define FIRMWARE_VERSION "0.2.0"
+#define FIRMWARE_VERSION "0.3.0"
 
-// Relay GPIO pins.
-// NOTE: GPIO16/17 are also used internally by ESP32-WROVER modules for the
-// onboard PSRAM chip's CS/CLK lines - a known pre-existing conflict (see
-// TODO.md in plampControlCenter), not introduced by this refactor, but
-// worth moving off of.
-#define COOLER_PIN 16       // relay channel 1
-#define MAIN_LIGHT_PIN 17   // relay channel 2
-#define DEHUMIDIFIER_PIN 18 // relay channel 3
+// Relay GPIO pins. Moved off GPIO16/17 (2026-08-16) - those are the two
+// pins ESP32-WROVER modules use internally for the onboard PSRAM chip's
+// CS/CLK lines, a documented WROVER gotcha, and the live-suspected cause
+// of the fan/light going unresponsive to switch commands (see
+// plampControlCenter's TODO.md). See WIRING.md for the full pin map and
+// the physical-rewire steps this pin change assumes have already been
+// done - flashing this without rewiring first means the relay control
+// lines are on the wrong GPIOs for what the firmware now drives.
+#define COOLER_PIN 25       // relay channel 1 - moved off GPIO16
+#define MAIN_LIGHT_PIN 26   // relay channel 2 - moved off GPIO17
+#define DEHUMIDIFIER_PIN 18 // relay channel 3 - unchanged, no conflict
 
 // Relay board (HL 58S v1.2): drive pin HIGH to energize relay
 #define RELAY_ACTIVE HIGH
@@ -29,12 +32,74 @@
 
 // DHT22 sensor
 #define DHTPIN 4
+// VCC moved off the always-on 3.3V rail (2026-08-16) so a wedged sensor
+// (see DHT_POWER_CYCLE_THRESHOLD_MS below) can be hard power-cycled
+// instead of only recoverable by physically unplugging it. See
+// WIRING.md.
+#define DHT_POWER_PIN 27
 #define DHTTYPE DHT22
 #define HUMIDITY_OFFSET 20.0
 
 constexpr unsigned long DHT_READ_INTERVAL_MS = 30000; // 30 seconds
 // No good read in this long => sensor considered unhealthy.
 constexpr unsigned long DHT_STALE_THRESHOLD_MS = DHT_READ_INTERVAL_MS * 3;
+// No good read in this long => assume the sensor is wedged (WiFi TX
+// current spike brownout - see WIRING.md's "Known issues") and hard
+// power-cycle it (DHT_POWER_PIN low -> delay -> high -> re-`dht.begin()`).
+// Well above DHT_STALE_THRESHOLD_MS so the stale-alert already firing
+// upstream isn't itself the trigger for this - this only kicks in once a
+// stale reading has persisted much longer than a routine blip.
+constexpr unsigned long DHT_POWER_CYCLE_THRESHOLD_MS = DHT_READ_INTERVAL_MS * 10; // 5 minutes
+// How long DHT_POWER_PIN is held low during a power-cycle - long enough
+// for the sensor's internal supply capacitor to fully discharge, so it
+// actually sees a real power-off rather than a brief dip.
+constexpr unsigned long DHT_POWER_CYCLE_OFF_MS = 2000;
+// Cheap fallback: if the sensor is still wedged this long after the
+// first power-cycle attempt (power-cycling repeats every
+// DHT_POWER_CYCLE_THRESHOLD_MS in the meantime), restart the whole
+// device. Won't fix a wedge that survives a real power-cycle, but costs
+// nothing and covers whatever that residual failure mode is.
+constexpr unsigned long DHT_RESTART_THRESHOLD_MS = DHT_READ_INTERVAL_MS * 40; // ~20 minutes
+
+// --- New sensors (2026-08-16, firmware groundwork - see WIRING.md for
+// full wiring instructions before connecting any of these) ---
+
+// Light sensor - simple LDR voltage divider, plain analog read. ADC1
+// (GPIO32-39 range), not ADC2 - ADC2 pins are unreliable for analogRead()
+// whenever WiFi is connected (a well-known ESP32 limitation, applies to
+// every analog input below too). Input-only pin, which is fine/preferred
+// for a read-only analog sensor.
+#define LDR_PIN 36
+
+// DS18B20 waterproof temperature probe (e.g. reservoir/nutrient water
+// temp) - OneWire digital protocol, needs an external ~4.7k pull-up
+// resistor between DATA and 3.3V (not provided on-chip).
+#define DS18B20_PIN 13
+
+// CO2 sensor (MH-Z19B, NDIR, UART) - wired to ESP32 UART2, pin-matrix
+// remapped (not UART2's default pins) to land on GPIOs otherwise free -
+// see WIRING.md.
+#define CO2_RX_PIN 14 // ESP32 RX - wire to the MH-Z19B's TX pin
+#define CO2_TX_PIN 19 // ESP32 TX - wire to the MH-Z19B's RX pin
+constexpr unsigned long CO2_READ_INTERVAL_MS = 5000; // MH-Z19B datasheet recommends not polling much faster than this
+
+// Capacitive soil moisture probes - up to 4 independent channels, each a
+// plain analog voltage input (same electrical interface whether the
+// probe behind it is a commercial capacitive module or a DIY potted 555
+// probe - see SOIL_MOISTURE_SENSOR.md). All ADC1 pins for the same
+// WiFi-safety reason as LDR_PIN above.
+#define SOIL_MOISTURE_PIN_COUNT 4
+constexpr int SOIL_MOISTURE_PINS[SOIL_MOISTURE_PIN_COUNT] = {32, 33, 34, 35};
+
+// Shared debounce interval for the plain-analogRead sensors above (LDR +
+// soil) - these have no protocol-imposed timing like the DHT/DS18B20/CO2
+// do, this just avoids re-sampling on every single loop() iteration.
+constexpr unsigned long ANALOG_SENSOR_READ_INTERVAL_MS = 1000;
+
+// DallasTemperature's requestTemperatures() blocks for ~750ms at the
+// default 12-bit resolution - gated behind this interval so that block
+// only happens periodically, not on every loop() iteration.
+constexpr unsigned long WATER_TEMP_READ_INTERVAL_MS = 10000;
 
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 10000; // 10 seconds between attempts
 
