@@ -226,8 +226,8 @@ J1, same idea/placement as the DS18B20's at J2.
 
 J1's full wiring, bare-sensor case - the pull-up resistor (DATA to VCC)
 and the two brownout-fix capacitors (VCC to GND, see "Migration
-checklist" below) all land at J1, with VCC as the shared middle rail so
-nothing has to cross another connection:
+checklist" below) all land on the same three nets, with VCC as the
+shared middle rail so nothing has to cross another connection:
 
 ```
 GPIO4  (DATA) ───────┬─────────────────────────────► DHT22 DATA pin
@@ -249,6 +249,26 @@ GND ────────────────────────┴�
 If your DHT22 is a breakout module (pull-up already on its own PCB),
 drop the 5.1kΩ resistor from this diagram - the two capacitors (still
 worth adding, they fix a different problem) are the same either way.
+
+**Recommended construction**: rather than soldering the resistor/
+capacitors onto bare wire out near the sensor, build them onto a small
+second perfboard ("satellite board") placed right next to the DHT22,
+wired in-line between J1 and the sensor:
+
+```
+J1 (main perfboard) ──DATA──┐                          ┌──DATA──► DHT22 DATA pin
+                     ──VCC──┤   small satellite board,  ├──VCC───► DHT22 VCC pin
+                     ──GND──┘   near the DHT22 - the     └──GND───► DHT22 GND pin
+                                 diagram above lives here
+```
+
+Same three nets, same two components, same diagram above - just split
+across two boards connected by a short length of wire instead of all
+living at J1 on the main board. This satisfies the "as close to the
+sensor as possible" placement that makes the capacitors effective (see
+their own note further down) regardless of how far J1 ends up from the
+DHT22 on the main perfboard. J1 itself then just passes DATA/VCC/GND
+straight through, component-free.
 
 Only build the terminals for sensors you're actually installing this
 round - an empty/unpopulated position is harmless, firmware already
