@@ -12,7 +12,7 @@
 // it (confirmed as a real, confusing bug in practice on 2026-08-15 - a
 // device showed "updated 14 hours ago" right after being flashed, because
 // that's how long it had been since the commit, not the flash).
-#define FIRMWARE_VERSION "0.3.0"
+#define FIRMWARE_VERSION "0.3.1"
 
 // Relay GPIO pins. Moved off GPIO16/17 (2026-08-16) - those are the two
 // pins ESP32-WROVER modules use internally for the onboard PSRAM chip's
@@ -29,6 +29,18 @@
 // Relay board (HL 58S v1.2): drive pin HIGH to energize relay
 #define RELAY_ACTIVE HIGH
 #define RELAY_INACTIVE LOW
+
+// Generic relay channels 4-6 (2026-08-16) - this is an 8-channel board,
+// but only 6 channels have a safe GPIO on this ESP32-WROVER board (see
+// WIRING.md's "Pin budget" section: every other general-purpose output
+// pin is already claimed or unsafe). CH7/CH8 stay unassigned - no code,
+// no pin, plampControlCenter's actuator_channels table can still name
+// them for future-proofing but nothing will actually switch. Index 0 of
+// this array is channel 4, index 1 is channel 5, index 2 is channel 6 -
+// see relay_channels.cpp's channelToIndex().
+#define RELAY_CHANNEL_COUNT 3
+#define RELAY_CHANNEL_FIRST 4 // channel numbering starts at 4 (1-3 are cooler/light/dehumidifier above)
+constexpr int RELAY_CHANNEL_PINS[RELAY_CHANNEL_COUNT] = {21, 22, 23};
 
 // DHT22 sensor
 #define DHTPIN 4

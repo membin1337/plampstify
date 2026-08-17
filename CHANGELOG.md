@@ -4,6 +4,15 @@ Tracks `FIRMWARE_VERSION` (`include/config.h`) - bumped manually on each
 firmware build/flash, exposed via `/health-check` so the client's Debug
 box can show which firmware is actually running. Newest first.
 
+## 0.3.1 - 2026-08-16
+Generic relay channels 4-6 (`relay_channels.cpp`, GPIO21/22/23 - see
+WIRING.md's "Relay channels" section) - plain manual on/off, same shape
+as the dehumidifier, each with its own `/actuators/channelN/read` +
+`/switch` route and folded into `/status` as `channelNStatus`. Channels
+7/8 still have no GPIO (no safe pin left on this board). Pairs with
+plampControlCenter's new System > Actuators naming matrix, which lets a
+user name/mark-wired any channel and control it from the Dashboard.
+
 ## 0.3.0 - 2026-08-16
 Moved the cooler/light relays off GPIO16/17 (to GPIO25/26) - those pins
 are also used internally by ESP32-WROVER modules for the onboard PSRAM

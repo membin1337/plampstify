@@ -9,6 +9,7 @@
 #include "co2_sensor.h"
 #include "config.h"
 #include "light_sensor.h"
+#include "relay_channels.h"
 #include "sensors.h"
 #include "server_report.h"
 #include "soil_moisture.h"
@@ -29,6 +30,7 @@ void setup() {
   Serial.println(FIRMWARE_VERSION);
 
   initActuators();
+  initRelayChannels();
   initAutomation();
   initSensors();
   initLightSensor();

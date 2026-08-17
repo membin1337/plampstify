@@ -8,6 +8,7 @@
 #include "co2_sensor.h"
 #include "config.h"
 #include "light_sensor.h"
+#include "relay_channels.h"
 #include "secrets.h"
 #include "sensors.h"
 #include "server_report.h"
@@ -265,8 +266,31 @@ void handleDehumidifierSwitch(AsyncWebServerRequest* request) {
   sendJson(request, doc);
 }
 
+// Generic relay channels 4-6 (2026-08-16, see relay_channels.h/WIRING.md)
+// - plain manual on/off, no auto-mode side effects, same shape as
+// handleDehumidifierRead/Switch. Parameterized by channel number and
+// returned as a closure since there are RELAY_CHANNEL_COUNT of these,
+// registered in a loop in registerRoutes() below - see that loop for how
+// the URL (e.g. /actuators/channel4/read) is built.
+ArRequestHandlerFunction channelReadHandler(int channel) {
+  return [channel](AsyncWebServerRequest* request) {
+    StaticJsonDocument<128> doc;
+    doc["status"] = getChannelStatus(channel) ? "ON" : "OFF";
+    sendJson(request, doc);
+  };
+}
+
+ArRequestHandlerFunction channelSwitchHandler(int channel) {
+  return [channel](AsyncWebServerRequest* request) {
+    setChannelStatus(channel, resolveDesiredState(request, getChannelStatus(channel)) ? 1 : 0);
+    StaticJsonDocument<128> doc;
+    doc["status"] = getChannelStatus(channel) ? "ON" : "OFF";
+    sendJson(request, doc);
+  };
+}
+
 void handleStatus(AsyncWebServerRequest* request) {
-  StaticJsonDocument<768> doc;
+  StaticJsonDocument<1024> doc;
   doc["coolerStatus"] = getCoolerStatus() ? "ON" : "OFF";
   doc["coolerTempAutoMode"] = getVentTemperatureAuto();
   doc["coolerHumidityAutoMode"] = getVentHumidityAuto();
@@ -313,6 +337,15 @@ void handleStatus(AsyncWebServerRequest* request) {
     obj["percent"] = getSoilMoisturePercent(i);
   }
 
+  // Generic relay channels 4-6 - named channelNStatus to match the
+  // coolerStatus/lightStatus/dehumidifierStatus naming already used
+  // above, so plamp-api's ACTUATOR_STATUS_FIELD map (server/index.js)
+  // can treat every actuator the same way regardless of which one it is.
+  for (int i = 0; i < RELAY_CHANNEL_COUNT; i++) {
+    int channel = RELAY_CHANNEL_FIRST + i;
+    doc["channel" + String(channel) + "Status"] = getChannelStatus(channel) ? "ON" : "OFF";
+  }
+
   sendJson(request, doc);
 }
 
@@ -353,6 +386,10 @@ bool isWriteRoute(AsyncWebServerRequest* request) {
   if (method == HTTP_PUT && url == "/actuators/dehumidifier/switch") return true;
   if (method == HTTP_POST && url == "/server-address") return true;
   if (method == HTTP_POST && url == "/sensors/soil/calibrate") return true;
+  // Matches /actuators/channel4/switch, /actuators/channel5/switch, etc.
+  // generically rather than hardcoding each - covers RELAY_CHANNEL_COUNT
+  // channels automatically if that ever grows.
+  if (method == HTTP_PUT && url.startsWith("/actuators/channel") && url.endsWith("/switch")) return true;
   return false;
 }
 
@@ -456,4 +493,17 @@ void registerRoutes(AsyncWebServer& server) {
   server.on("/sensors/co2/read", HTTP_GET, handleCo2Read);
   server.on("/sensors/soil/read", HTTP_GET, handleSoilMoistureRead);
   server.on("/sensors/soil/calibrate", HTTP_POST, handleSoilCalibrate);
+
+  // Generic relay channels 4-6 - /actuators/channel4/read, .../switch,
+  // etc. Route strings are built into locals first since server.on()
+  // needs the c_str() pointer valid only for the duration of this call
+  // (it copies the URI internally), which a temporary's .c_str() alone
+  // wouldn't guarantee.
+  for (int i = 0; i < RELAY_CHANNEL_COUNT; i++) {
+    int channel = RELAY_CHANNEL_FIRST + i;
+    String readPath = "/actuators/channel" + String(channel) + "/read";
+    String switchPath = "/actuators/channel" + String(channel) + "/switch";
+    server.on(readPath.c_str(), HTTP_GET, channelReadHandler(channel));
+    server.on(switchPath.c_str(), HTTP_PUT, channelSwitchHandler(channel));
+  }
 }

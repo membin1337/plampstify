@@ -23,7 +23,7 @@ suspected to be causing the fan/light to already be unresponsive - see
 plampControlCenter's TODO.md). Work through the "Migration checklist"
 section below in order: rewire first, flash second.
 
-## Target pin map (firmware v0.3.0+)
+## Target pin map (firmware v0.3.1+)
 
 ```
 GPIO4  -> DHT22 DATA (digital, single-wire protocol - not an analog input)
@@ -31,9 +31,9 @@ GPIO13 -> DS18B20 DATA (digital, OneWire protocol) - needs an external 4.7k pull
 GPIO14 -> CO2 sensor UART2 RX (ESP32 receives - wire to the MH-Z19B's TX pin)
 GPIO18 -> RELAY CH3 -> DEHUMIDIFIER (unchanged)
 GPIO19 -> CO2 sensor UART2 TX (ESP32 transmits - wire to the MH-Z19B's RX pin)
-GPIO21 -> RELAY CH4 -> unassigned, reserved for the next actuator (new)
-GPIO22 -> RELAY CH5 -> unassigned, reserved for the next actuator (new)
-GPIO23 -> RELAY CH6 -> unassigned, reserved for the next actuator (new)
+GPIO21 -> RELAY CH4 -> generic channel, name it on System > Actuators once wired
+GPIO22 -> RELAY CH5 -> generic channel, name it on System > Actuators once wired
+GPIO23 -> RELAY CH6 -> generic channel, name it on System > Actuators once wired
 GPIO25 -> RELAY CH1 -> COOLER/EXHAUST FAN (moved off GPIO16)
 GPIO26 -> RELAY CH2 -> MAIN LIGHT (moved off GPIO17)
 GPIO27 -> DHT22 VCC (moved off the 3.3V rail - lets firmware hard power-cycle the sensor)
@@ -55,9 +55,9 @@ GND    -> shared ground for every sensor/relay board below
 | GPIO14 | CO2 sensor UART2 RX | ESP32 receives - connects to MH-Z19B **TX** |
 | GPIO18 | Dehumidifier relay (channel 3) | Unchanged - no PSRAM conflict |
 | GPIO19 | CO2 sensor UART2 TX | ESP32 transmits - connects to MH-Z19B **RX** |
-| GPIO21 | Relay channel 4 - **unassigned** | Reserved for the next actuator you add; wire it and give it a `#define` in `config.h` when you know what it's driving |
-| GPIO22 | Relay channel 5 - **unassigned** | Same as GPIO21 |
-| GPIO23 | Relay channel 6 - **unassigned** | Same as GPIO21 |
+| GPIO21 | Relay channel 4 (generic) | Firmware-ready (`relay_channels.cpp`, `/actuators/channel4/read`+`/switch`) - name it on plampControlCenter's System > Actuators page once wired |
+| GPIO22 | Relay channel 5 (generic) | Same as GPIO21, channel 5 |
+| GPIO23 | Relay channel 6 (generic) | Same as GPIO21, channel 6 |
 | GPIO25 | Cooler/exhaust fan relay (channel 1) | Moved off GPIO16 to clear the PSRAM conflict |
 | GPIO26 | Main light relay (channel 2) | Moved off GPIO17 |
 | GPIO27 | DHT22 VCC | Moved off the 3.3V rail - firmware can now hard power-cycle just the sensor after a wedge |
@@ -68,11 +68,14 @@ GND    -> shared ground for every sensor/relay board below
 | GPIO36 | LDR light sensor (analog) | ADC1, input-only, labeled "SVP" on most WROVER boards |
 | GND | Shared ground | Every relay/sensor below shares this with the ESP32 |
 
-GPIO21/22/23 are wired to relay channels 4-6 but not yet claimed by any
-firmware feature - `pinMode`/`digitalWrite` for them isn't in the code
-yet, only reserved here so the physical wiring can go in now and the
-firmware catch up later without a second rewire. Leave those relay
-channels' loads disconnected until then.
+GPIO21/22/23 (relay channels 4-6) are fully firmware-supported as of
+v0.3.1 - `relay_channels.cpp` drives them, each with its own
+`/actuators/channelN/read` + `/switch` HTTP route, folded into `/status`
+as `channelNStatus`. They're plain manual on/off relays with no
+automation of their own, same as the dehumidifier. Once wired, give the
+channel a real name (and mark it "wired") on plampControlCenter's
+System > Actuators page - that's what makes it show up as a toggle on
+the Dashboard and as a target option when creating automation rules.
 
 ⚠️ **ADC1 vs ADC2**: every analog sensor above (LDR + 4x soil) is
 deliberately on an **ADC1** pin (the GPIO32-39 range). ESP32's ADC2
@@ -84,9 +87,10 @@ of them are already claimed by something else above anyway.
 
 ### Relay channels: only 6 of 8 have a GPIO
 
-This board has 8 relay channels; the pin map above only assigns 6
-(3 driven today - fan/light/dehumidifier - plus 3 reserved above). **CH7
-and CH8 have no GPIO assigned and can't get a clean one on this board** -
+This board has 8 relay channels; the pin map above only assigns 6 (fan/
+light/dehumidifier plus the 3 generic channels above, all firmware-
+supported). **CH7 and CH8 have no GPIO assigned and can't get a clean
+one on this board** -
 see "Pin budget" below for exactly why. Two ways to actually wire them if
 you need all 8 eventually:
 
@@ -325,11 +329,11 @@ this order, don't flash ahead of the rewire.
    disconnected (absorbs WiFi TX current spikes so the brownout wedge
    ideally never happens in the first place - zero firmware/pin change on
    top of the GPIO27 move, just added at the sensor).
-3. **Wire whichever new sensors you're adding this round** (LDR/DS18B20/
-   CO2/soil - each section above), or skip any you don't have hardware
-   for yet. Firmware handles a missing sensor gracefully (stays
-   "stale"/unreported), so it's fine to wire these incrementally rather
-   than all at once.
+3. **Wire whichever new sensors/relay channels you're adding this round**
+   (LDR/DS18B20/CO2/soil/relay channels 4-6 - each section above), or
+   skip any you don't have hardware for yet. Firmware handles a missing
+   sensor gracefully (stays "stale"/unreported), so it's fine to wire
+   these incrementally rather than all at once.
 4. **Flash over USB first** (`pio run -e esp-wrover-kit -t upload`) - a
    `config.h` pin change needs a full rebuild+upload; OTA
    (`esp-wrover-kit-ota` env) is fine again for every upload after this
