@@ -1,13 +1,14 @@
 # Hardware wiring
 
 Physical wiring reference for the plamp controller - ESP32-**WROVER**
-module (`board = esp-wrover-kit` in `platformio.ini`), 3-channel relay
-board (HL 58S v1.2), a DHT22 temperature/humidity sensor, and (new,
-2026-08-16) an LDR light sensor, a DS18B20 waterproof temperature probe,
-an MH-Z19B CO2 sensor, and up to 4 capacitive soil-moisture probes. Pin
-assignments below are pulled directly from `include/config.h` - if this
-doc and `config.h` ever disagree, `config.h` is the source of truth and
-this doc is stale.
+module (`board = esp-wrover-kit` in `platformio.ini`), an **8-channel**
+relay board (HL 58S v1.2, only 3 channels actually driven today - see
+"Relay channels" below for the other 5), a DHT22 temperature/humidity
+sensor, and (new, 2026-08-16) an LDR light sensor, a DS18B20 waterproof
+temperature probe, an MH-Z19B CO2 sensor, and up to 4 capacitive
+soil-moisture probes. Pin assignments below are pulled directly from
+`include/config.h` - if this doc and `config.h` ever disagree, `config.h`
+is the source of truth and this doc is stale.
 
 ## ⚠️ Status: firmware ahead of the physical wiring
 
@@ -30,6 +31,9 @@ GPIO13 -> DS18B20 DATA (digital, OneWire protocol) - needs an external 4.7k pull
 GPIO14 -> CO2 sensor UART2 RX (ESP32 receives - wire to the MH-Z19B's TX pin)
 GPIO18 -> RELAY CH3 -> DEHUMIDIFIER (unchanged)
 GPIO19 -> CO2 sensor UART2 TX (ESP32 transmits - wire to the MH-Z19B's RX pin)
+GPIO21 -> RELAY CH4 -> unassigned, reserved for the next actuator (new)
+GPIO22 -> RELAY CH5 -> unassigned, reserved for the next actuator (new)
+GPIO23 -> RELAY CH6 -> unassigned, reserved for the next actuator (new)
 GPIO25 -> RELAY CH1 -> COOLER/EXHAUST FAN (moved off GPIO16)
 GPIO26 -> RELAY CH2 -> MAIN LIGHT (moved off GPIO17)
 GPIO27 -> DHT22 VCC (moved off the 3.3V rail - lets firmware hard power-cycle the sensor)
@@ -39,6 +43,7 @@ GPIO34 -> SOIL MOISTURE PROBE #3 (analog input, ADC1, input-only pin)
 GPIO35 -> SOIL MOISTURE PROBE #4 (analog input, ADC1, input-only pin)
 GPIO36 -> LDR LIGHT SENSOR (analog input, ADC1, input-only pin - labeled "SVP" on most WROVER boards)
 GPIO39 -> reserved / spare ADC1 channel (labeled "SVN")
+RELAY CH7, CH8 -> not wired to any GPIO - no safe general-purpose pin left on this board (see "Relay channels" below)
 3.3V   -> DHT22 GND reference removed - see DHT22 GND below; also powers LDR divider, DS18B20, soil probes
 GND    -> shared ground for every sensor/relay board below
 ```
@@ -50,6 +55,9 @@ GND    -> shared ground for every sensor/relay board below
 | GPIO14 | CO2 sensor UART2 RX | ESP32 receives - connects to MH-Z19B **TX** |
 | GPIO18 | Dehumidifier relay (channel 3) | Unchanged - no PSRAM conflict |
 | GPIO19 | CO2 sensor UART2 TX | ESP32 transmits - connects to MH-Z19B **RX** |
+| GPIO21 | Relay channel 4 - **unassigned** | Reserved for the next actuator you add; wire it and give it a `#define` in `config.h` when you know what it's driving |
+| GPIO22 | Relay channel 5 - **unassigned** | Same as GPIO21 |
+| GPIO23 | Relay channel 6 - **unassigned** | Same as GPIO21 |
 | GPIO25 | Cooler/exhaust fan relay (channel 1) | Moved off GPIO16 to clear the PSRAM conflict |
 | GPIO26 | Main light relay (channel 2) | Moved off GPIO17 |
 | GPIO27 | DHT22 VCC | Moved off the 3.3V rail - firmware can now hard power-cycle just the sensor after a wedge |
@@ -60,7 +68,11 @@ GND    -> shared ground for every sensor/relay board below
 | GPIO36 | LDR light sensor (analog) | ADC1, input-only, labeled "SVP" on most WROVER boards |
 | GND | Shared ground | Every relay/sensor below shares this with the ESP32 |
 
-No other GPIOs are in use by this firmware.
+GPIO21/22/23 are wired to relay channels 4-6 but not yet claimed by any
+firmware feature - `pinMode`/`digitalWrite` for them isn't in the code
+yet, only reserved here so the physical wiring can go in now and the
+firmware catch up later without a second rewire. Leave those relay
+channels' loads disconnected until then.
 
 ⚠️ **ADC1 vs ADC2**: every analog sensor above (LDR + 4x soil) is
 deliberately on an **ADC1** pin (the GPIO32-39 range). ESP32's ADC2
@@ -69,6 +81,59 @@ readings whenever WiFi is connected - a well-known ESP32 limitation, not
 specific to this project. Don't move any analog sensor onto an ADC2 pin
 (GPIO0, 2, 4, 12-15, 25-27) even though some of those look "free" - most
 of them are already claimed by something else above anyway.
+
+### Relay channels: only 6 of 8 have a GPIO
+
+This board has 8 relay channels; the pin map above only assigns 6
+(3 driven today - fan/light/dehumidifier - plus 3 reserved above). **CH7
+and CH8 have no GPIO assigned and can't get a clean one on this board** -
+see "Pin budget" below for exactly why. Two ways to actually wire them if
+you need all 8 eventually:
+
+1. **Free up a pin already claimed above.** If you decide against one of
+   the 4 soil-moisture channels or the CO2 sensor, its GPIO(s) become
+   available for a relay instead (a relay only needs a plain digital
+   output, so any of GPIO13/14/19/32/33 would work once whatever
+   currently uses it is removed from the plan).
+2. **Add an I2C GPIO expander** (e.g. a PCF8574, 8 extra I/O pins over
+   2 wires - SDA/SCL, GPIO21/22 in this map's case, though those are
+   currently earmarked as relay channels 4/5 themselves, so this option
+   and "wire CH4/CH5 directly" are mutually exclusive - pick one).
+   Firmware support for this doesn't exist yet - real work if you go this
+   route, not just a pin reassignment.
+
+Leaving CH7/CH8 unconnected on the relay board is completely fine if you
+don't need 8 actuators - it's normal for a relay board to have spare,
+unused channels.
+
+### Pin budget: what's actually available for something new
+
+Every ESP32 GPIO that's safe to use as a general-purpose *output* (relay,
+digital sensor power, etc.) on this specific board is accounted for by
+the table above - **there are no more free output-capable pins left**
+once GPIO21/22/23 are claimed by relay channels 4-6. This is the honest
+constraint any future feature (relay channel 7/8, a new digital sensor,
+an LED indicator, anything needing `digitalWrite`) runs into on this
+hardware:
+
+| Pins | Status |
+|---|---|
+| GPIO6-11 | SPI flash bus - **never usable**, wired internally to the flash chip |
+| GPIO0, 2, 5, 12, 15 | Boot-strapping pins - avoid; an external pull-up/down from a relay board or sensor can interfere with the boot mode the chip samples off these at reset |
+| GPIO1, 3 | UART0 TX/RX - technically repurposable, but this firmware's `Serial.println()` debug logging (used throughout, e.g. every sensor module's failure logging) and the USB programming/serial-monitor connection both depend on these - not worth giving up |
+| GPIO16, 17 | Used internally by this WROVER module's onboard PSRAM - the exact conflict this whole doc exists to move relays *off* of, don't reuse |
+| GPIO4, 13, 14, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33 | **All claimed** - see the pin map table above |
+| GPIO34, 35, 36, 39 | Claimed, and input-only anyway (no internal pull resistors, no output capability) - only ever usable for another analog/digital *input*, never a relay |
+| GPIO37, 38 | Not broken out on this board (unlike 36/39) - unusable regardless of what you'd want them for |
+
+**Bottom line**: this ESP32-WROVER's usable pin budget is fully spent.
+Any further expansion (relay CH7/CH8, another sensor) needs either (a)
+freeing up a pin already claimed here by dropping something else from
+the plan, or (b) an I2C GPIO expander for outputs / an ADC expander
+(e.g. an ADS1115) for more analog inputs than the 6 ADC1 channels this
+board already uses up (32/33/34/35/36/39). Both are real hardware
+additions, not just pin reassignments - flag this before assuming "just
+add one more sensor" is free.
 
 ### Relay polarity
 
@@ -277,16 +342,18 @@ this order, don't flash ahead of the rewire.
    shows `status: "stale"` forever, not a crash).
 6. **Calibrate any soil probes** wired (see "Capacitive soil moisture
    probes" above).
-7. ⚠️ **Verify GPIO25/26/27/13/14/19/32-36 against your specific
+7. ⚠️ **Verify GPIO21/22/23/25/26/27/13/14/19/32-36 against your specific
    WROVER-KIT board revision before wiring anything.** The dev *board*
    (as opposed to the WROVER *module*) can break some GPIOs out to a
    camera header/JTAG on official Espressif kits, and the exact mapping
    differs between hardware revisions - this project's board has GPIO18
    already confirmed working as a plain relay output in practice, which
    suggests no camera/JTAG conflict on this specific unit, but verify
-   before committing wiring on the new pins too. If any of these turn out
-   to already be spoken for, GPIO21/22/23 are general-purpose spares not
-   used by this firmware.
+   before committing wiring on the new pins too. Unlike the previous
+   revision of this doc, there are **no spare general-purpose pins left**
+   to fall back to if one of these turns out to be already spoken for -
+   see "Pin budget" above; freeing one up means dropping something else
+   from this plan.
 
 ## What's physically wired today (pre-rewire, firmware v0.2.0 and earlier)
 
