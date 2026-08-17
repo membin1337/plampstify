@@ -13,6 +13,6 @@ known issues.
 
 See [WIRING.md](WIRING.md) for the full hardware wiring reference -
 pin assignments, wiring diagrams for each sensor, calibration steps, and
-the physical rewire migration checklist. **Read the "Status" section at
-the top before flashing** - firmware v0.3.0 targets a pin map the
+the physical rewire migration checklist. **Read the "Before flashing"
+section at the top first** - firmware v0.3.1+ targets a pin map the
 physical device likely hasn't been rewired to yet.
