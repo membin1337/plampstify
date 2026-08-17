@@ -224,6 +224,32 @@ needed for those. A **bare DHT22** (no breakout PCB) has no pull-up
 anywhere - add a 5.1kΩ resistor across DATA (GPIO4) and VCC (GPIO27) at
 J1, same idea/placement as the DS18B20's at J2.
 
+J1's full wiring, bare-sensor case - the pull-up resistor (DATA to VCC)
+and the two brownout-fix capacitors (VCC to GND, see "Migration
+checklist" below) all land at J1, with VCC as the shared middle rail so
+nothing has to cross another connection:
+
+```
+GPIO4  (DATA) ───────┬─────────────────────────────► DHT22 DATA pin
+                      │
+                   ┌──┴──┐
+                   │5.1kΩ│  <- pull-up resistor, DATA to VCC
+                   └──┬──┘
+                      │
+GPIO27 (VCC) ─────────┴────┬───────┬───────────────► DHT22 VCC pin
+                            │       │
+                        ┌───┴──┐ ┌──┴───┐
+                        │470µF │ │0.1µF │  <- brownout capacitors, VCC to GND (in parallel with each other)
+                        │ (+)  │ │      │
+                        └───┬──┘ └──┬───┘
+                            │       │
+GND ────────────────────────┴───────┴───────────────► DHT22 GND pin
+```
+
+If your DHT22 is a breakout module (pull-up already on its own PCB),
+drop the 5.1kΩ resistor from this diagram - the two capacitors (still
+worth adding, they fix a different problem) are the same either way.
+
 Only build the terminals for sensors you're actually installing this
 round - an empty/unpopulated position is harmless, firmware already
 treats a missing sensor as "stale" rather than erroring (see each
@@ -322,19 +348,27 @@ Also present in every `/status` response as `light: { raw, percent }`.
 ### 2. DS18B20 waterproof temperature probe
 
 For reservoir/nutrient water temperature. 3-wire (non-parasitic power)
-wiring:
+wiring, with the pull-up resistor bridging DATA and VCC (the two rails
+it sits between) so no connection has to cross over another:
 
 ```
-DS18B20 red   (VCC)  -> 3.3V
-DS18B20 black (GND)  -> GND
-DS18B20 yellow(DATA) -> GPIO13, with a 4.7kΩ pull-up resistor from GPIO13 to 3.3V
+GPIO13 (DATA) ──────┬─────────────────────────► DS18B20 DATA (yellow)
+                     │
+                   ┌─┴───┐
+                   │4.7kΩ│  <- pull-up resistor, DATA to VCC
+                   └─┬───┘
+                     │
+3.3V (VCC) ──────────┴─────────────────────────► DS18B20 VCC (red)
+
+GND ────────────────────────────────────────────► DS18B20 GND (black)
 ```
 
 Wire colors above match the common waterproof DS18B20 probe (black/red/
 yellow) - **verify against your actual probe**, colors aren't
 standardized across manufacturers. The 4.7kΩ pull-up is required
 (OneWire is an open-drain bus) - without it, reads will fail or return
-garbage/85°C default values.
+garbage/85°C default values. Not polarized (unlike the electrolytic
+capacitor in J1's diagram below) - either resistor lead goes either way.
 
 **Endpoint**: `GET /sensors/water-temp/read` → `{ sensorId, temperatureC,
 status }` (`temperatureC` omitted until the first successful read).
