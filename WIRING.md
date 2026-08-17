@@ -5,7 +5,7 @@ module (`board = esp-wrover-kit` in `platformio.ini`), an **8-channel**
 relay board (HL 58S v1.2, only 3 channels actually driven today - see
 "Relay channels" below for the other 5), a DHT22 temperature/humidity
 sensor, and (new, 2026-08-16) an LDR light sensor, a DS18B20 waterproof
-temperature probe, an MH-Z19B CO2 sensor, and up to 4 capacitive
+temperature probe, an MH-Z19 CO2 sensor, and up to 4 capacitive
 soil-moisture probes. Pin assignments below are pulled directly from
 `include/config.h` - if this doc and `config.h` ever disagree, `config.h`
 is the source of truth and this doc is stale.
@@ -28,9 +28,9 @@ section below in order: rewire first, flash second.
 ```
 GPIO4  -> DHT22 DATA (digital, single-wire protocol - not an analog input)
 GPIO13 -> DS18B20 DATA (digital, OneWire protocol) - needs an external 4.7k pull-up to 3.3V
-GPIO14 -> CO2 sensor UART2 RX (ESP32 receives - wire to the MH-Z19B's TX pin)
+GPIO14 -> CO2 sensor UART2 RX (ESP32 receives - wire to the MH-Z19's TX pin)
 GPIO18 -> RELAY CH3 -> DEHUMIDIFIER (unchanged)
-GPIO19 -> CO2 sensor UART2 TX (ESP32 transmits - wire to the MH-Z19B's RX pin)
+GPIO19 -> CO2 sensor UART2 TX (ESP32 transmits - wire to the MH-Z19's RX pin)
 GPIO21 -> RELAY CH4 -> generic channel, name it on System > Actuators once wired
 GPIO22 -> RELAY CH5 -> generic channel, name it on System > Actuators once wired
 GPIO23 -> RELAY CH6 -> generic channel, name it on System > Actuators once wired
@@ -52,9 +52,9 @@ GND    -> shared ground for every sensor/relay board below
 |---|---|---|
 | GPIO4 | DHT22 data | Digital one-wire protocol, not analog |
 | GPIO13 | DS18B20 data (OneWire) | Needs an external ~4.7kΩ pull-up resistor between DATA and 3.3V |
-| GPIO14 | CO2 sensor UART2 RX | ESP32 receives - connects to MH-Z19B **TX** |
+| GPIO14 | CO2 sensor UART2 RX | ESP32 receives - connects to MH-Z19 **TX** |
 | GPIO18 | Dehumidifier relay (channel 3) | Unchanged - no PSRAM conflict |
-| GPIO19 | CO2 sensor UART2 TX | ESP32 transmits - connects to MH-Z19B **RX** |
+| GPIO19 | CO2 sensor UART2 TX | ESP32 transmits - connects to MH-Z19 **RX** |
 | GPIO21 | Relay channel 4 (generic) | Firmware-ready (`relay_channels.cpp`, `/actuators/channel4/read`+`/switch`) - name it on plampControlCenter's System > Actuators page once wired |
 | GPIO22 | Relay channel 5 (generic) | Same as GPIO21, channel 5 |
 | GPIO23 | Relay channel 6 (generic) | Same as GPIO21, channel 6 |
@@ -207,8 +207,8 @@ starting scheme.
 |---|---|---|---|
 | J1 | DHT22 | DATA, VCC, GND | GPIO4, GPIO27, GND |
 | J2 | DS18B20 | DATA, VCC, GND | GPIO13 (+ on-board 4.7kΩ pull-up to 3.3V), 3.3V, GND |
-| J3 | MH-Z19B CO2 sensor | VCC, GND, TX, RX | 5V, GND, GPIO14 (ESP32 RX, sensor's TX), GPIO19 (ESP32 TX, sensor's RX) |
-| J4 | LDR breakout ("MH Sensor Series" module) | VCC, GND, A0 | 3.3V, GND, GPIO36 - D0 unused, leave disconnected |
+| J3 | MH-Z19 CO2 sensor | VCC, GND, TX, RX | 5V, GND, GPIO14 (ESP32 RX, sensor's TX), GPIO19 (ESP32 TX, sensor's RX) |
+| J4 | LDR breakout module | VCC, GND, A0 | 3.3V, GND, GPIO36 |
 | J5 | Soil moisture probe 1 | VCC, GND, AOUT | 3.3V, GND, GPIO32 |
 | J6 | Soil moisture probe 2 | VCC, GND, AOUT | 3.3V, GND, GPIO33 |
 | J7 | Soil moisture probe 3 | VCC, GND, AOUT | 3.3V, GND, GPIO34 |
@@ -331,9 +331,14 @@ status }` (`temperatureC` omitted until the first successful read).
 Also present in every `/status` response as `waterTemp: { temperatureC,
 status }`.
 
-### 3. MH-Z19B CO2 sensor
+### 3. MH-Z19 CO2 sensor
 
-NDIR sensor, UART interface. ⚠️ **Power**: the MH-Z19B needs **5V**, not
+NDIR sensor, UART interface. Covers the whole MH-Z19 family (plain
+MH-Z19 and MH-Z19B alike, and clones sold under generic titles like
+"Sensor Gases Digital MH-Z19 CO2" without specifying a suffix) - same
+UART wiring, same 9600-baud command protocol, and the `MHZ19` Arduino
+library used here (`platformio.ini`'s `WifWaf/MH-Z19` dependency)
+supports both. ⚠️ **Power**: the MH-Z19 needs **5V**, not
 3.3V (verify against your specific module's datasheet/silkscreen before
 wiring) - but its UART TX/RX pins are 3.3V-logic-level safe per the
 datasheet, so they connect directly to the ESP32's GPIOs with no level
@@ -341,10 +346,10 @@ shifter needed. Double-check this against your exact module before
 connecting; a genuine 5V-logic UART into an ESP32 GPIO can damage it.
 
 ```
-MH-Z19B VCC -> 5V (NOT 3.3V)
-MH-Z19B GND -> GND
-MH-Z19B TX  -> GPIO14 (ESP32 UART2 RX)
-MH-Z19B RX  -> GPIO19 (ESP32 UART2 TX)
+MH-Z19 VCC -> 5V (NOT 3.3V)
+MH-Z19 GND -> GND
+MH-Z19 TX  -> GPIO14 (ESP32 UART2 RX)
+MH-Z19 RX  -> GPIO19 (ESP32 UART2 TX)
 ```
 
 Automatic baseline calibration (ABC) is disabled in firmware

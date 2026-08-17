@@ -2,7 +2,7 @@
 
 void initCo2Sensor();
 
-// Reads the MH-Z19B over UART2, debounced to CO2_READ_INTERVAL_MS (the
+// Reads the MH-Z19 over UART2, debounced to CO2_READ_INTERVAL_MS (the
 // datasheet-recommended minimum poll interval). Call every loop()
 // iteration; no-ops between intervals.
 void pollCo2Sensor();
